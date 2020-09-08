@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
-
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { RoomsModule } from './rooms/rooms.module';
 @Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
+  imports: [
+    ServeStaticModule.forRoot({
+      rootPath: __dirname + '/../../frontend/dist',
+    }),
+    RoomsModule,
+  ],
 })
 export class AppModule {}
