@@ -18,12 +18,14 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
   @SubscribeMessage('joinRoom')
   joinRoom(socket: Socket, payload: { roomId: string; password: string; username: string }) {
-    return this.roomsService.addToRoom(socket, payload.roomId, payload.password, payload.username);
+    const room = this.roomsService.addToRoom(socket, payload.roomId, payload.password, payload.username);
+    if (!room) return false;
+    this.server.to(room.id).emit('roomChange', room);
+    return room;
   }
 
   @SubscribeMessage('sendChatMessage')
   sendMessage(client: Socket, payload: { text: string; username: string; roomId: string }): void {
-    console.log('sendChatMessage', payload, Object.keys(client.rooms));
     this.server.to(payload.roomId).emit('sendChatMessage', {
       text: payload.text,
       id: this.roomsService.getChatMessageId(),
@@ -33,12 +35,18 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
   @SubscribeMessage('changeRoomSettings')
   changeRoomSettings(socket: Socket, payload: { id: string; name: string; password: string }) {
-    console.log('changeRoomSettings');
     this.server
       .to(payload.id)
-      .emit('changeRoomSettings', this.roomsService.editRoom(payload.id, payload.name, payload.password));
+      .emit('roomChange', this.roomsService.editRoom(payload.id, payload.name, payload.password));
   }
-
+  @SubscribeMessage('connectRTC')
+  connectRTC(socket: Socket, payload: { id1: string; id2: string; roomId: string; offer: any }) {
+    const room = this.roomsService.getRoomForMembers(payload.roomId);
+    if (!room) return false;
+    const member = room.members.find(member => member.userId === payload.id2);
+    if (!member) return false;
+    this.server.to(member.socketId).emit('connectRTC', { offer: payload.offer, id1: payload.id1, id2: payload.id2 });
+  }
   afterInit() {
     this.logger.log('Init');
   }
@@ -46,7 +54,7 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   handleDisconnect(socket: Socket) {
     const room = this.roomsService.removeAnyRoom(socket);
     if (!room) return;
-    this.server.to(room.id).emit('changeRoomSettings', room);
+    this.server.to(room.id).emit('roomChange', room);
     this.logger.log(`Client disconnected: ${socket.id}`);
   }
 

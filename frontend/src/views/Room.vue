@@ -62,6 +62,8 @@
 </template>
 <script>
 import api from '../api';
+const { RTCPeerConnection, RTCSessionDescription } = window;
+
 export default {
   data: function() {
     return {
@@ -77,6 +79,7 @@ export default {
       video: false,
       needPassword: true,
       loginError: '',
+      peers: {},
     };
   },
   methods: {
@@ -109,15 +112,33 @@ export default {
       this.chatMessage = '';
     },
     registerEvents() {
+      Object.values(this.peers).forEach(peer => peer.close());
+      this.peers = {};
       this.socket.on('sendChatMessage', msg => {
         this.messages.push(msg);
         this.$nextTick(function() {
           this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight;
         });
       });
-      this.socket.on('changeRoomSettings', room => {
-        console.log('settingsChange');
+      this.socket.on('roomChange', room => {
         this.room = room;
+      });
+      this.socket.on('connectRTC', async payload => {
+        console.log('getConnection', payload);
+        this.getRTCPeerConnection(payload.id1);
+        console.log('state1', this.peers[payload.id1].connectionState);
+        await this.peers[payload.id1].setRemoteDescription(new RTCSessionDescription(payload.offer));
+        if (payload.offer.type === 'offer') {
+          const answer = await this.peers[payload.id1].createAnswer();
+          await this.peers[payload.id1].setLocalDescription(new RTCSessionDescription(answer));
+          this.socket.emit('connectRTC', {
+            id1: payload.id2,
+            id2: payload.id1,
+            roomId: this.$route.params.id,
+            offer: answer,
+          });
+        }
+        console.log('state2', this.peers[payload.id1].connectionState);
       });
       this.updateMedia();
     },
@@ -125,18 +146,40 @@ export default {
       navigator.getUserMedia(
         {
           audio: true,
-          video: {
-            width: { min: 1024, max: 1920 },
-            height: { min: 776, max: 1080 },
-          },
         },
-        stream => {
+        async stream => {
           this.$refs['video_' + this.userId][0].srcObject = stream;
+          this.room.members.forEach(async member => {
+            if (member.userId === this.userId) return;
+            this.getRTCPeerConnection(member.userId);
+            const offer = await this.peers[member.userId].createOffer();
+            await this.peers[member.userId].setLocalDescription(new RTCSessionDescription(offer));
+            this.socket.emit('connectRTC', {
+              id1: this.userId,
+              id2: member.userId,
+              roomId: this.$route.params.id,
+              offer,
+            });
+            stream.getTracks().forEach(track => this.peers[member.userId].addTrack(track, stream));
+          });
         },
         error => {
-          console.warn(error.message);
+          console.warn(error);
         },
       );
+    },
+    getRTCPeerConnection(userId) {
+      if (this.peers[userId]) return this.peers[userId];
+      this.peers[userId] = new RTCPeerConnection();
+      this.peers[userId].ontrack = ({ streams: [stream] }) => (this.$refs['video_' + userId][0].srcObject = stream);
+      this.peers[userId].onconnectionstatechange = event => {
+        console.log(userId, this.peers[userId].connectionState);
+        /*if (this.peers[userId].connectionState !== 'connected') {
+          this.peers[userId].close();
+          this.peers[userId] = null;
+        }*/
+      };
+      return this.peers[userId];
     },
   },
   computed: {
@@ -156,6 +199,7 @@ export default {
   },
   beforeDestroy() {
     if (this.socket) this.$store.dispatch('disconnectSocket');
+    Object.values(this.peers).forEach(peer => peer.close());
   },
 };
 </script>
@@ -256,6 +300,7 @@ export default {
         width: 320px;
         height: 180px;
         position: relative;
+        background: #302c2c;
         video {
           width: 100%;
           height: 100%;

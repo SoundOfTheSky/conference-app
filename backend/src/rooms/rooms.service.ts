@@ -13,13 +13,19 @@ export class RoomsService {
       id: room.id,
       name: room.name,
       password: room.password,
-      members: room.members.map(member => ({ userId: member.userId, username: member.username })),
+      visible: room.visible,
+      members: room.members.map(member => ({
+        userId: member.userId,
+        username: member.username,
+        socketId: member.socket.id,
+      })),
     };
   }
   private formatRoomForUser(room) {
     return {
       id: room.id,
       name: room.name,
+      visible: room.visible,
       needPassword: room.password !== '',
     };
   }
@@ -31,6 +37,11 @@ export class RoomsService {
     console.log('getRoom', roomId);
     const room = this.rooms.find(room => room.id === roomId);
     return room ? this.formatRoomForUser(room) : undefined;
+  }
+  getRoomForMembers(roomId: string) {
+    console.log('getRoom', roomId);
+    const room = this.rooms.find(room => room.id === roomId);
+    return room ? this.cutRoomForMember(room) : undefined;
   }
   create(roomData: CreateRoomDto) {
     console.log('createRoom');
