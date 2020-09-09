@@ -39,13 +39,25 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       .to(payload.id)
       .emit('roomChange', this.roomsService.editRoom(payload.id, payload.name, payload.password));
   }
-  @SubscribeMessage('connectRTC')
-  connectRTC(socket: Socket, payload: { id1: string; id2: string; roomId: string; offer: any }) {
+  @SubscribeMessage('RTCSendDescription')
+  RTCSendDescription(socket: Socket, payload: { id1: string; id2: string; roomId: string; offer: any }) {
     const room = this.roomsService.getRoomForMembers(payload.roomId);
     if (!room) return false;
     const member = room.members.find(member => member.userId === payload.id2);
     if (!member) return false;
-    this.server.to(member.socketId).emit('connectRTC', { offer: payload.offer, id1: payload.id1, id2: payload.id2 });
+    this.server
+      .to(member.socketId)
+      .emit('RTCSendDescription', { offer: payload.offer, id1: payload.id1, id2: payload.id2 });
+  }
+  @SubscribeMessage('RTCSendCandidate')
+  RTCSendCandidate(socket: Socket, payload: { id1: string; id2: string; roomId: string; dir: number; candidate: any }) {
+    const room = this.roomsService.getRoomForMembers(payload.roomId);
+    if (!room) return false;
+    const member = room.members.find(member => member.userId === payload.id2);
+    if (!member) return false;
+    this.server
+      .to(member.socketId)
+      .emit('RTCSendCandidate', { candidate: payload.candidate, id1: payload.id1, id2: payload.id2, dir: payload.dir });
   }
   afterInit() {
     this.logger.log('Init');

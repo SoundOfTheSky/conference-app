@@ -30,21 +30,17 @@ export class RoomsService {
     };
   }
   getAll() {
-    console.log('getAllRooms');
     return this.rooms.filter(room => room.visible).map(room => this.formatRoomForUser(room));
   }
   getRoom(roomId: string) {
-    console.log('getRoom', roomId);
     const room = this.rooms.find(room => room.id === roomId);
     return room ? this.formatRoomForUser(room) : undefined;
   }
   getRoomForMembers(roomId: string) {
-    console.log('getRoom', roomId);
     const room = this.rooms.find(room => room.id === roomId);
     return room ? this.cutRoomForMember(room) : undefined;
   }
   create(roomData: CreateRoomDto) {
-    console.log('createRoom');
     let id;
     if (roomData.id) {
       if (this.rooms.find(room => room.id === id)) return false;
@@ -66,13 +62,13 @@ export class RoomsService {
   }
   addToRoom(socket: Socket, roomId: string, password: string, username: string) {
     const room = this.rooms.find(room => room.id === roomId);
+    console.log(room.password, password);
     if (!room || room.password !== password) return false;
     room.members.push({
       userId: this.getUserId() + '',
       username: username,
       socket: socket,
     });
-    console.log('addToRoom', roomId);
     socket.join(roomId);
     return this.cutRoomForMember(room);
   }
@@ -97,7 +93,6 @@ export class RoomsService {
   editRoom(roomId: string, name: string, password: string) {
     const room = this.rooms.find(room => room.id === roomId);
     if (!room) return false;
-    console.log('ok');
     room.name = name;
     room.password = password;
     return this.cutRoomForMember(room);

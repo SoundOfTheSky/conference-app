@@ -80,6 +80,7 @@ export default {
       needPassword: true,
       loginError: '',
       peers: {},
+      stream: null,
     };
   },
   methods: {
@@ -123,22 +124,35 @@ export default {
       this.socket.on('roomChange', room => {
         this.room = room;
       });
-      this.socket.on('connectRTC', async payload => {
-        console.log('getConnection', payload);
-        this.getRTCPeerConnection(payload.id1);
-        console.log('state1', this.peers[payload.id1].connectionState);
-        await this.peers[payload.id1].setRemoteDescription(new RTCSessionDescription(payload.offer));
+      this.socket.on('RTCSendDescription', async payload => {
+        const isOffer = payload.offer.type === 'offer';
+        const peer = this.getRTCPeerConnection(payload.id1, isOffer ? 0 : 1);
+        await peer.setRemoteDescription(new RTCSessionDescription(payload.offer));
         if (payload.offer.type === 'offer') {
-          const answer = await this.peers[payload.id1].createAnswer();
-          await this.peers[payload.id1].setLocalDescription(new RTCSessionDescription(answer));
-          this.socket.emit('connectRTC', {
-            id1: payload.id2,
+          const answer = await peer.createAnswer();
+          await peer.setLocalDescription(new RTCSessionDescription(answer));
+          this.socket.emit('RTCSendDescription', {
+            id1: this.userId,
             id2: payload.id1,
             roomId: this.$route.params.id,
             offer: answer,
           });
+          if (this.peers[payload.id1][1]) return;
+          const peer2 = this.getRTCPeerConnection(payload.id1, 1);
+          this.stream.getTracks().forEach(track => peer2.addTrack(track, this.stream));
+          const offer = await peer2.createOffer();
+          await peer2.setLocalDescription(new RTCSessionDescription(offer));
+          this.socket.emit('RTCSendDescription', {
+            id1: this.userId,
+            id2: payload.id1,
+            roomId: this.$route.params.id,
+            offer,
+          });
         }
-        console.log('state2', this.peers[payload.id1].connectionState);
+      });
+      this.socket.on('RTCSendCandidate', payload => {
+        const peer = this.getRTCPeerConnection(payload.id1, payload.dir);
+        if (payload.candidate) peer.addIceCandidate(payload.candidate);
       });
       this.updateMedia();
     },
@@ -146,21 +160,23 @@ export default {
       navigator.getUserMedia(
         {
           audio: true,
+          video: true,
         },
         async stream => {
           this.$refs['video_' + this.userId][0].srcObject = stream;
+          this.stream = stream;
           this.room.members.forEach(async member => {
             if (member.userId === this.userId) return;
-            this.getRTCPeerConnection(member.userId);
-            const offer = await this.peers[member.userId].createOffer();
-            await this.peers[member.userId].setLocalDescription(new RTCSessionDescription(offer));
-            this.socket.emit('connectRTC', {
+            const peer = this.getRTCPeerConnection(member.userId, 1);
+            stream.getTracks().forEach(track => peer.addTrack(track, stream));
+            const offer = await peer.createOffer();
+            await peer.setLocalDescription(new RTCSessionDescription(offer));
+            this.socket.emit('RTCSendDescription', {
               id1: this.userId,
               id2: member.userId,
               roomId: this.$route.params.id,
               offer,
             });
-            stream.getTracks().forEach(track => this.peers[member.userId].addTrack(track, stream));
           });
         },
         error => {
@@ -168,18 +184,29 @@ export default {
         },
       );
     },
-    getRTCPeerConnection(userId) {
-      if (this.peers[userId]) return this.peers[userId];
-      this.peers[userId] = new RTCPeerConnection();
-      this.peers[userId].ontrack = ({ streams: [stream] }) => (this.$refs['video_' + userId][0].srcObject = stream);
-      this.peers[userId].onconnectionstatechange = event => {
-        console.log(userId, this.peers[userId].connectionState);
-        /*if (this.peers[userId].connectionState !== 'connected') {
-          this.peers[userId].close();
+    getRTCPeerConnection(userId, dir = 0) {
+      if (!this.peers[userId]) this.peers[userId] = [];
+      if (this.peers[userId][dir]) return this.peers[userId][dir];
+      this.peers[userId][dir] = new RTCPeerConnection();
+      this.peers[userId][dir].ontrack = ({ streams: [stream] }) =>
+        (this.$refs['video_' + userId][0].srcObject = stream);
+      this.peers[userId][dir].onconnectionstatechange = () => {
+        if (['disconnected', 'failed', 'closed'].includes(this.peers[userId][dir].connectionState)) {
+          if (this.peers[userId][0]) this.peers[userId][0].close();
+          if (this.peers[userId][1]) this.peers[userId][1].close();
           this.peers[userId] = null;
-        }*/
+        }
       };
-      return this.peers[userId];
+      this.peers[userId][dir].onicecandidate = e => {
+        this.socket.emit('RTCSendCandidate', {
+          id1: this.userId,
+          id2: userId,
+          roomId: this.$route.params.id,
+          dir: dir === 1 ? 0 : 1,
+          candidate: e.candidate,
+        });
+      };
+      return this.peers[userId][dir];
     },
   },
   computed: {
@@ -191,7 +218,7 @@ export default {
     this.$store.dispatch('connectSocket');
     api.getRoom(this.$route.params.id).then(async room => {
       if (!room) {
-        this.passwordJoin = Math.floor(Math.random() * 1000000);
+        this.passwordJoin = Math.floor(Math.random() * 1000000) + '';
         await api.createRoom({ name: 'sampleName', password: this.passwordJoin, id: this.$route.params.id });
         this.connectToRoom();
       } else this.needPassword = room.needPassword;
@@ -199,7 +226,11 @@ export default {
   },
   beforeDestroy() {
     if (this.socket) this.$store.dispatch('disconnectSocket');
-    Object.values(this.peers).forEach(peer => peer.close());
+    Object.values(this.peers).forEach(peer => {
+      if (!peer) return;
+      if (peer[0]) peer[0].close();
+      if (peer[1]) peer[1].close();
+    });
   },
 };
 </script>
