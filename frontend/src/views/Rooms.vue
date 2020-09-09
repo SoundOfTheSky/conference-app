@@ -18,7 +18,7 @@ export default {
 <template>
   <div class="rooms">
     <div class="room" v-for="room in rooms" @click="connectToRoom(room.id)" :key="room.id">
-      {{ room.id + ' ' + room.name + ' ' + room.password }}
+      {{ room.id + ' ' + room.name }}
     </div>
     <div @click="connectToRoom(Math.floor(Math.random() * 1000000))" class="create-room">Создать комнату</div>
   </div>

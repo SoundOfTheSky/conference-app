@@ -23,23 +23,34 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
   @SubscribeMessage('sendChatMessage')
   sendMessage(client: Socket, payload: { text: string; username: string; roomId: string }): void {
-    console.log('sendChatMessage', payload);
-    client.to(payload.roomId).emit('sendChatMessage', {
+    console.log('sendChatMessage', payload, Object.keys(client.rooms));
+    this.server.to(payload.roomId).emit('sendChatMessage', {
       text: payload.text,
       id: this.roomsService.getChatMessageId(),
       username: payload.username,
     });
   }
 
-  afterInit(server: Server) {
+  @SubscribeMessage('changeRoomSettings')
+  changeRoomSettings(socket: Socket, payload: { id: string; name: string; password: string }) {
+    console.log('changeRoomSettings');
+    this.server
+      .to(payload.id)
+      .emit('changeRoomSettings', this.roomsService.editRoom(payload.id, payload.name, payload.password));
+  }
+
+  afterInit() {
     this.logger.log('Init');
   }
 
-  handleDisconnect(client: Socket) {
-    this.logger.log(`Client disconnected: ${client.id}`);
+  handleDisconnect(socket: Socket) {
+    const room = this.roomsService.removeAnyRoom(socket);
+    if (!room) return;
+    this.server.to(room.id).emit('changeRoomSettings', room);
+    this.logger.log(`Client disconnected: ${socket.id}`);
   }
 
-  handleConnection(client: Socket, ...args: any[]) {
+  handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
   }
 }
