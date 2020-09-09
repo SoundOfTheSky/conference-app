@@ -6,9 +6,18 @@ import { Room } from './interfaces/rooms.interface';
 @Injectable()
 export class RoomsService {
   private readonly rooms: Room[] = [];
+  private lastChatMessageId = 0;
+  private lastUserId = 0;
+  private cutRoomForMember(room) {
+    return {
+      name: room.name,
+      password: room.password,
+      members: room.members.map(member => ({ userId: member.userId, username: member.username })),
+    };
+  }
   getAll() {
     console.log('getAllRooms');
-    return [...this.rooms];
+    return this.rooms.map(el => ({ name: el.name, id: el.id }));
   }
   getRoom(roomId: string) {
     console.log('getRoom', roomId);
@@ -34,15 +43,32 @@ export class RoomsService {
     });
     return true;
   }
-  addToRoom(roomId: string, password: string, socket: Socket, peer: string) {
+  addToRoom(socket: Socket, roomId: string, password: string, username: string) {
     console.log('addToRoom');
     const room = this.rooms.find(room => room.id === roomId);
     if (!room || room.password !== password) return false;
     room.members.push({
-      peer: peer,
+      userId: this.getUserId() + '',
+      username: username,
       socket: socket,
     });
     socket.join(roomId);
-    return room.members.map(member => member.peer);
+    return this.cutRoomForMember(room);
+  }
+  findUsersRoom(userId: string) {
+    for (const room of this.rooms) {
+      for (const member of room.members) {
+        if (member.userId === userId) return room;
+      }
+    }
+    return false;
+  }
+  getChatMessageId() {
+    this.lastChatMessageId += 1;
+    return this.lastChatMessageId;
+  }
+  getUserId() {
+    this.lastUserId += 1;
+    return this.lastUserId;
   }
 }

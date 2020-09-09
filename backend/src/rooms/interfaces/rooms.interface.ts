@@ -4,7 +4,8 @@ export interface Room {
   readonly name: string;
   readonly password: string;
   readonly members: {
-    readonly peer: string;
+    readonly userId: string;
+    readonly username: string;
     readonly socket: Socket;
   }[];
 }

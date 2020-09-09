@@ -15,13 +15,20 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   constructor(private readonly roomsService: RoomsService) {}
   @WebSocketServer() server: Server;
   private logger: Logger = new Logger('AppGateway');
+
   @SubscribeMessage('joinRoom')
-  joinRoom(client: Socket, payload: { roomId: string; password: string; peer: string }) {
-    return this.roomsService.addToRoom(payload.roomId, payload.password, client, payload.peer);
+  joinRoom(socket: Socket, payload: { roomId: string; password: string; username: string }) {
+    return this.roomsService.addToRoom(socket, payload.roomId, payload.password, payload.username);
   }
-  @SubscribeMessage('sendMessage')
-  sendMessage(client: Socket, payload: { message: string; roomId: string }): void {
-    client.to(payload.roomId).emit('sendMessage', payload.message);
+
+  @SubscribeMessage('sendChatMessage')
+  sendMessage(client: Socket, payload: { text: string; username: string; roomId: string }): void {
+    console.log('sendChatMessage', payload);
+    client.to(payload.roomId).emit('sendChatMessage', {
+      text: payload.text,
+      id: this.roomsService.getChatMessageId(),
+      username: payload.username,
+    });
   }
 
   afterInit(server: Server) {
