@@ -20,7 +20,7 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   joinRoom(socket: Socket, payload: { roomId: string; password: string; username: string }) {
     const room = this.roomsService.addToRoom(socket, payload.roomId, payload.password, payload.username);
     if (!room) return false;
-    this.server.to(room.id).emit('roomChange', room);
+    if (!room.error) this.server.to(room.id).emit('roomChange', room);
     return room;
   }
 
@@ -34,10 +34,11 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   }
 
   @SubscribeMessage('changeRoomSettings')
-  changeRoomSettings(socket: Socket, payload: { id: string; name: string; password: string }) {
-    this.server
-      .to(payload.id)
-      .emit('roomChange', this.roomsService.editRoom(payload.id, payload.name, payload.password));
+  changeRoomSettings(socket: Socket, payload: { id: string; name: string; password: string; visible }) {
+    const answer = this.roomsService.editRoom(payload.id, payload.name, payload.password, payload.visible);
+    if ('error' in answer && answer.error) {
+      if (payload.id) this.server.to(payload.id).emit('roomChange', this.roomsService.getRoomForMembers(payload.id));
+    } else this.server.to(payload.id).emit('roomChange', answer);
   }
   @SubscribeMessage('RTCSendDescription')
   RTCSendDescription(socket: Socket, payload: { id1: string; id2: string; roomId: string; offer: any }) {
@@ -50,14 +51,14 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       .emit('RTCSendDescription', { offer: payload.offer, id1: payload.id1, id2: payload.id2 });
   }
   @SubscribeMessage('RTCSendCandidate')
-  RTCSendCandidate(socket: Socket, payload: { id1: string; id2: string; roomId: string; dir: number; candidate: any }) {
+  RTCSendCandidate(socket: Socket, payload: { id1: string; id2: string; roomId: string; candidate: any }) {
     const room = this.roomsService.getRoomForMembers(payload.roomId);
     if (!room) return false;
     const member = room.members.find(member => member.userId === payload.id2);
     if (!member) return false;
     this.server
       .to(member.socketId)
-      .emit('RTCSendCandidate', { candidate: payload.candidate, id1: payload.id1, id2: payload.id2, dir: payload.dir });
+      .emit('RTCSendCandidate', { candidate: payload.candidate, id1: payload.id1, id2: payload.id2 });
   }
   afterInit() {
     this.logger.log('Init');

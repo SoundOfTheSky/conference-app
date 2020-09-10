@@ -1,14 +1,13 @@
 import { Socket } from 'socket.io';
-import { CreateRoomDto } from './dto/create-room.dto';
 import { Injectable } from '@nestjs/common';
-import { Room } from './interfaces/rooms.interface';
+import { Room, roomForMembers, roomForUsers, Response } from './interfaces/rooms.interface';
 
 @Injectable()
 export class RoomsService {
   private readonly rooms: Room[] = [];
   private lastChatMessageId = 0;
   private lastUserId = 0;
-  private cutRoomForMember(room) {
+  private cutRoomForMember(room): roomForMembers {
     return {
       id: room.id,
       name: room.name,
@@ -21,7 +20,7 @@ export class RoomsService {
       })),
     };
   }
-  private formatRoomForUser(room) {
+  private formatRoomForUser(room): roomForUsers {
     return {
       id: room.id,
       name: room.name,
@@ -40,10 +39,18 @@ export class RoomsService {
     const room = this.rooms.find(room => room.id === roomId);
     return room ? this.cutRoomForMember(room) : undefined;
   }
-  create(roomData: CreateRoomDto) {
+  create(roomData: { name: string; password: string; id: string; visible: boolean }) {
     let id;
+    if (roomData.name === undefined) return { error: 'Room has no name' };
+    roomData.name = roomData.name.trim();
+    if (roomData.name.length < 3) return { error: 'Room name must be 3 to 24 characters long' };
+    if (roomData.name.length > 24) return { error: 'Room name must be 3 to 24 characters long' };
+    if (roomData.password === undefined) return { error: 'Room has no password' };
+    roomData.password = roomData.password.trim();
+    if (roomData.password.length > 24) return { error: 'Password must be less than 24 characters long' };
     if (roomData.id) {
-      if (this.rooms.find(room => room.id === id)) return false;
+      roomData.id = roomData.id.trim();
+      if (this.rooms.find(room => room.id === id)) return { error: 'Room with this id already exists' };
       id = roomData.id;
     } else {
       id = Math.floor(Math.random() * 1000000) + '';
@@ -56,14 +63,15 @@ export class RoomsService {
       name: roomData.name,
       password: roomData.password,
       members: [],
-      visible: true,
+      visible: roomData.visible,
     });
     return true;
   }
-  addToRoom(socket: Socket, roomId: string, password: string, username: string) {
+  addToRoom(socket: Socket, roomId: string, password: string, username: string): Response<roomForMembers> {
     const room = this.rooms.find(room => room.id === roomId);
+    if (!room) return { error: 'There is no room with this id' };
     console.log(room.password, password);
-    if (!room || room.password !== password) return false;
+    if (room.password !== password) return { error: 'Wrong password' };
     room.members.push({
       userId: this.getUserId() + '',
       username: username,
@@ -90,11 +98,19 @@ export class RoomsService {
     }
     return false;
   }
-  editRoom(roomId: string, name: string, password: string) {
+  editRoom(roomId: string, name: string, password: string, visible: boolean) {
     const room = this.rooms.find(room => room.id === roomId);
-    if (!room) return false;
+    if (!room) return { error: 'There is no room with this id' };
+    if (name === undefined) return { error: 'Room has no name' };
+    name = name.trim();
+    if (name.length < 3) return { error: 'Room name must be 3 to 24 characters long' };
+    if (name.length > 24) return { error: 'Room name must be 3 to 24 characters long' };
+    if (password === undefined) return { error: 'Room has no password' };
+    password = password.trim();
+    if (password.length > 24) return { error: 'Password must be less than 24 characters long' };
     room.name = name;
     room.password = password;
+    room.visible = visible;
     return this.cutRoomForMember(room);
   }
   getChatMessageId() {

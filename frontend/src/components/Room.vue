@@ -1,22 +1,10 @@
 <template>
   <div class="room">
     <div class="login" v-if="!room">
-      <div v-if="loginForm.loading">Loading...</div>
-      <template v-else>
-        <template v-if="loginForm.needCreation">
-          <input v-model="loginForm.username" placeholder="Username" />
-          <input v-model="loginForm.name" placeholder="Name of room" />
-          <input v-model="loginForm.password" placeholder="Password for room" />
-          <label><input type="checkbox" v-model="loginForm.visible" />Is room visible in rooms list</label>
-          <div class="login-button" @click="createRoom">Connect</div>
-        </template>
-        <template v-else>
-          <input v-model="loginForm.username" placeholder="Username..." />
-          <input v-if="loginForm.needPassword" v-model="loginForm.password" placeholder="Password for room..." />
-          <div class="login-button" @click="connectToRoom">Connect</div>
-        </template>
-        <div class="error">{{ loginForm.loginError }}</div>
-      </template>
+      <input v-model="username" placeholder="Username..." />
+      <input v-if="needPassword" v-model="passwordJoin" placeholder="Password for room..." />
+      <div class="login-button" @click="connectToRoom">Connect</div>
+      <div class="error">{{ loginError }}</div>
     </div>
     <template v-else>
       <div class="playground">
@@ -27,12 +15,8 @@
           </div>
         </div>
         <div class="actions">
-          <div @click="toggleAudio" :style="{ background: audio ? 'green' : 'red' }">
-            Audio
-          </div>
-          <div @click="toggleVideo" :style="{ background: video ? 'green' : 'red' }">
-            Video
-          </div>
+          <div @click="audio = !audio" :style="{ background: audio ? 'green' : 'red' }">Audio</div>
+          <div @click="video = !video" :style="{ background: video ? 'green' : 'red' }">Video</div>
           <div @click="$router.push({ path: '../rooms' })">Disconnect</div>
         </div>
       </div>
@@ -83,25 +67,20 @@ const { RTCPeerConnection, RTCSessionDescription } = window;
 export default {
   data: function() {
     return {
+      peer: null,
+      passwordJoin: '',
       room: null,
+      username: 'ban',
       userId: null,
       chatMessage: '',
       messages: [],
       sideBarTab: 'chat',
       audio: true,
       video: true,
+      needPassword: true,
+      loginError: '',
       peers: {},
       stream: null,
-      loginForm: {
-        name: '',
-        username: '',
-        password: '',
-        visible: true,
-        needPassword: true,
-        needCreation: false,
-        loading: true,
-        loginError: '',
-      },
     };
   },
   methods: {
@@ -110,46 +89,26 @@ export default {
     },
     connectToRoom() {
       if (!this.socket) this.$store.dispatch('connectSocket');
-      this.loginForm.loading = true;
       this.socket.emit(
         'joinRoom',
         {
           roomId: this.$route.params.id,
-          password: this.loginForm.password,
-          username: this.loginForm.username,
+          password: this.passwordJoin,
+          username: this.username,
         },
         response => {
-          this.loginForm.loading = false;
-          if (!response) return (this.loginForm.loginError = 'But nobody came...');
-          if (response.error) return (this.loginForm.loginError = response.error);
+          if (!response) return (this.loginError = 'Wrong password');
           this.room = response;
           this.userId = response.members[response.members.length - 1].userId;
           this.registerEvents();
         },
       );
     },
-    createRoom() {
-      if (!this.socket) this.$store.dispatch('connectSocket');
-      this.loginForm.loading = true;
-      api
-        .createRoom({
-          name: this.loginForm.name,
-          password: this.loginForm.password,
-          id: this.$route.params.id,
-          visible: this.loginForm.visible,
-        })
-        .then(response => {
-          this.loginForm.loading = false;
-          if (!response) return (this.loginForm.loginError = 'But nobody came...');
-          if (response.error) return (this.loginForm.loginError = response.error);
-          this.connectToRoom();
-        });
-    },
     sendChatMessage() {
       this.socket.emit('sendChatMessage', {
         roomId: this.$route.params.id,
         text: this.chatMessage,
-        username: this.loginForm.username,
+        username: this.username,
       });
       this.chatMessage = '';
     },
@@ -193,8 +152,6 @@ export default {
           video: this.video,
         },
         async stream => {
-          Object.values(this.peers).forEach(peer => peer && peer.close());
-          if (this.stream) this.stream.getTracks().forEach(track => track.stop());
           this.$refs['video_' + this.userId][0].srcObject = stream;
           this.stream = stream;
           this.room.members.forEach(async member => {
@@ -236,16 +193,6 @@ export default {
       };
       return this.peers[userId];
     },
-    toggleAudio() {
-      this.audio = !this.audio;
-      if (this.stream) this.stream.getTracks().find(track => track.kind === 'audio').enabled = this.audio;
-    },
-    toggleVideo() {
-      this.video = !this.video;
-      if (this.stream) {
-        this.stream.getTracks().find(track => track.kind === 'video').enabled = this.video;
-      }
-    },
   },
   computed: {
     socket: function() {
@@ -253,18 +200,22 @@ export default {
     },
   },
   async created() {
-    this.loginForm.loading = true;
     this.$store.dispatch('connectSocket');
     api.getRoom(this.$route.params.id).then(async room => {
-      this.loginForm.loading = false;
-      if (!room) this.loginForm.needCreation = true;
-      else this.loginForm.needPassword = room.needPassword;
+      if (!room) {
+        this.passwordJoin = Math.floor(Math.random() * 1000000) + '';
+        await api.createRoom({ name: 'sampleName', password: this.passwordJoin, id: this.$route.params.id });
+        this.connectToRoom();
+      } else this.needPassword = room.needPassword;
     });
   },
   beforeDestroy() {
     if (this.socket) this.$store.dispatch('disconnectSocket');
-    Object.values(this.peers).forEach(peer => peer && peer.close());
-    if (this.stream) this.stream.getTracks().forEach(track => track.stop());
+    Object.values(this.peers).forEach(peer => {
+      if (!peer) return;
+      if (peer[0]) peer[0].close();
+      if (peer[1]) peer[1].close();
+    });
   },
 };
 </script>
