@@ -4,7 +4,7 @@ import { RoomsModule } from './rooms/rooms.module';
 @Module({
   imports: [
     ServeStaticModule.forRoot({
-      rootPath: __dirname + '/../../frontend/dist',
+      rootPath: __dirname + '/../client',
     }),
     RoomsModule,
   ],

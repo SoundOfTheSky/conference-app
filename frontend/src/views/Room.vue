@@ -186,35 +186,39 @@ export default {
       });
       this.updateMedia();
     },
-    updateMedia() {
-      navigator.getUserMedia(
-        {
-          audio: this.audio,
-          video: this.video,
-        },
-        async stream => {
-          Object.values(this.peers).forEach(peer => peer && peer.close());
-          if (this.stream) this.stream.getTracks().forEach(track => track.stop());
-          this.$refs['video_' + this.userId][0].srcObject = stream;
-          this.stream = stream;
-          this.room.members.forEach(async member => {
-            if (member.userId === this.userId) return;
-            const peer = this.getRTCPeerConnection(member.userId);
-            stream.getTracks().forEach(track => peer.addTrack(track, stream));
-            const offer = await peer.createOffer();
-            await peer.setLocalDescription(new RTCSessionDescription(offer));
-            this.socket.emit('RTCSendDescription', {
-              id1: this.userId,
-              id2: member.userId,
-              roomId: this.$route.params.id,
-              offer,
-            });
-          });
-        },
-        error => {
-          console.warn(error);
-        },
-      );
+    async checkIfHasDevice(inputType) {
+      let md = navigator.mediaDevices;
+      if (!md || !md.enumerateDevices) return false;
+      const devices = await md.enumerateDevices();
+      console.log(devices);
+      return devices.some(device => inputType === device.kind);
+    },
+    async updateMedia() {
+      const hasVideo = await this.checkIfHasDevice('videoinput');
+      const hasAudio = await this.checkIfHasDevice('audioinput');
+      console.log({
+        audio: hasVideo,
+        video: hasAudio,
+      });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: hasVideo,
+        video: hasAudio,
+      });
+      this.$refs['video_' + this.userId][0].srcObject = stream;
+      this.stream = stream;
+      this.room.members.forEach(async member => {
+        if (member.userId === this.userId) return;
+        const peer = this.getRTCPeerConnection(member.userId);
+        stream.getTracks().forEach(track => peer.addTrack(track, stream));
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(new RTCSessionDescription(offer));
+        this.socket.emit('RTCSendDescription', {
+          id1: this.userId,
+          id2: member.userId,
+          roomId: this.$route.params.id,
+          offer,
+        });
+      });
     },
     getRTCPeerConnection(userId) {
       if (this.peers[userId]) return this.peers[userId];

@@ -1,5 +1,6 @@
 import axios from 'axios';
-const host = 'http://localhost:3000/api/';
+import config from '../config';
+const host = config.url + ':3000/api/';
 function getConstructor(url) {
   return (params = {}) => {
     return new Promise((r, j) => {
