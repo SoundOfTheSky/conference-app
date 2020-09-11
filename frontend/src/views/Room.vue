@@ -21,16 +21,16 @@
     <template v-else>
       <div class="playground">
         <div class="members">
-          <div class="member" v-for="member in room.members" :key="member.userId">
-            <video autoplay :muted="member.userId === userId" :ref="'video_' + member.userId" />
+          <div class="member" v-for="member in room.members" :key="member.socketId">
+            <video autoplay :muted="member.socketId === socket.id" :ref="'video_' + member.socketId" />
             <span> {{ member.username }}</span>
           </div>
         </div>
         <div class="actions">
-          <div @click="toggleAudio" :style="{ background: audio ? 'green' : 'red' }">
+          <div v-if="audio !== undefined" @click="toggleAudio" :style="{ background: audio ? 'green' : 'red' }">
             Audio
           </div>
-          <div @click="toggleVideo" :style="{ background: video ? 'green' : 'red' }">
+          <div v-if="video !== undefined" @click="toggleVideo" :style="{ background: video ? 'green' : 'red' }">
             Video
           </div>
           <div @click="$router.push({ path: '../rooms' })">Disconnect</div>
@@ -78,20 +78,16 @@
 </template>
 <script>
 import api from '../api';
-const { RTCPeerConnection, RTCSessionDescription } = window;
-
+import * as webRTC from '../utils/webRTC.js';
 export default {
   data: function() {
     return {
       room: null,
-      userId: null,
       chatMessage: '',
       messages: [],
       sideBarTab: 'chat',
       audio: true,
       video: true,
-      peers: {},
-      stream: null,
       loginForm: {
         name: '',
         username: '',
@@ -123,7 +119,6 @@ export default {
           if (!response) return (this.loginForm.loginError = 'But nobody came...');
           if (response.error) return (this.loginForm.loginError = response.error);
           this.room = response;
-          this.userId = response.members[response.members.length - 1].userId;
           this.registerEvents();
         },
       );
@@ -154,8 +149,6 @@ export default {
       this.chatMessage = '';
     },
     registerEvents() {
-      Object.values(this.peers).forEach(peer => peer.close());
-      this.peers = {};
       this.socket.on('sendChatMessage', msg => {
         this.messages.push(msg);
         this.$nextTick(function() {
@@ -165,90 +158,43 @@ export default {
       this.socket.on('roomChange', room => {
         this.room = room;
       });
-      this.socket.on('RTCSendDescription', async payload => {
-        const peer = this.getRTCPeerConnection(payload.id1);
-        await peer.setRemoteDescription(new RTCSessionDescription(payload.offer));
-        if (payload.offer.type === 'offer') {
-          this.stream.getTracks().forEach(track => peer.addTrack(track, this.stream));
-          const answer = await peer.createAnswer();
-          await peer.setLocalDescription(new RTCSessionDescription(answer));
-          this.socket.emit('RTCSendDescription', {
-            id1: this.userId,
-            id2: payload.id1,
-            roomId: this.$route.params.id,
-            offer: answer,
-          });
-        }
-      });
-      this.socket.on('RTCSendCandidate', payload => {
-        const peer = this.getRTCPeerConnection(payload.id1);
-        if (payload.candidate) peer.addIceCandidate(payload.candidate);
-      });
       this.updateMedia();
     },
     async checkIfHasDevice(inputType) {
       let md = navigator.mediaDevices;
       if (!md || !md.enumerateDevices) return false;
       const devices = await md.enumerateDevices();
-      console.log(devices);
       return devices.some(device => inputType === device.kind);
+    },
+    onNewStream(socketId, stream) {
+      this.$refs['video_' + socketId][0].srcObject = stream;
+    },
+    onStreamStop(socketId) {
+      console.log('stream stopped: ' + socketId);
     },
     async updateMedia() {
       const hasVideo = await this.checkIfHasDevice('videoinput');
       const hasAudio = await this.checkIfHasDevice('audioinput');
-      console.log({
-        audio: hasVideo,
-        video: hasAudio,
-      });
+      this.audio = hasAudio ? true : undefined;
+      this.video = hasVideo ? true : undefined;
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: hasVideo,
         video: hasAudio,
       });
-      this.$refs['video_' + this.userId][0].srcObject = stream;
-      this.stream = stream;
+      this.$refs['video_' + this.socket.id][0].srcObject = stream;
+      webRTC.register(this.socket, stream, this.onNewStream, this.onStreamStop);
       this.room.members.forEach(async member => {
-        if (member.userId === this.userId) return;
-        const peer = this.getRTCPeerConnection(member.userId);
-        stream.getTracks().forEach(track => peer.addTrack(track, stream));
-        const offer = await peer.createOffer();
-        await peer.setLocalDescription(new RTCSessionDescription(offer));
-        this.socket.emit('RTCSendDescription', {
-          id1: this.userId,
-          id2: member.userId,
-          roomId: this.$route.params.id,
-          offer,
-        });
+        if (member.socketId === this.socket.id) return;
+        webRTC.connectToUser(member.socketId);
       });
-    },
-    getRTCPeerConnection(userId) {
-      if (this.peers[userId]) return this.peers[userId];
-      this.peers[userId] = new RTCPeerConnection();
-      this.peers[userId].ontrack = ({ streams: [stream] }) => (this.$refs['video_' + userId][0].srcObject = stream);
-      this.peers[userId].onconnectionstatechange = () => {
-        if (['disconnected', 'failed', 'closed'].includes(this.peers[userId].connectionState)) {
-          if (this.peers[userId]) this.peers[userId].close();
-          this.peers[userId] = null;
-        }
-      };
-      this.peers[userId].onicecandidate = e => {
-        this.socket.emit('RTCSendCandidate', {
-          id1: this.userId,
-          id2: userId,
-          roomId: this.$route.params.id,
-          candidate: e.candidate,
-        });
-      };
-      return this.peers[userId];
     },
     toggleAudio() {
       this.audio = !this.audio;
-      if (this.stream) this.stream.getTracks().find(track => track.kind === 'audio').enabled = this.audio;
+      if (webRTC.stream) webRTC.stream.getTracks().find(track => track.kind === 'audio').enabled = this.audio;
     },
     toggleVideo() {
       this.video = !this.video;
-      if (this.stream) {
-        this.stream.getTracks().find(track => track.kind === 'video').enabled = this.video;
-      }
+      if (webRTC.stream) webRTC.stream.getTracks().find(track => track.kind === 'video').enabled = this.video;
     },
   },
   computed: {
@@ -267,8 +213,8 @@ export default {
   },
   beforeDestroy() {
     if (this.socket) this.$store.dispatch('disconnectSocket');
-    Object.values(this.peers).forEach(peer => peer && peer.close());
-    if (this.stream) this.stream.getTracks().forEach(track => track.stop());
+    webRTC.closeAllPeers();
+    webRTC.stopStream();
   },
 };
 </script>

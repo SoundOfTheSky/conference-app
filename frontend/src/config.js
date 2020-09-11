@@ -1,4 +1,7 @@
 const config = {
-  url: 'https://nekita.glitch.me',
+  protocol: 'https://',
+  port: '',
+  socketPort: '',
+  host: window.location.hostname,
 };
 export default config;

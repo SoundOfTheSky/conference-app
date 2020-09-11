@@ -1,8 +1,6 @@
 import Vue from 'vue';
 import Vuex from 'vuex';
 import api from '../api';
-import io from 'socket.io-client';
-import config from '../config';
 Vue.use(Vuex);
 const state = {
   rooms: [],
@@ -21,7 +19,7 @@ const actions = {
     api.getRooms().then(el => mutations.setRooms(el));
   },
   connectSocket() {
-    mutations.setSocket(io(config.url + ':3001'));
+    mutations.setSocket(api.connectSocket());
   },
   disconnectSocket() {
     state.socket.disconnect();

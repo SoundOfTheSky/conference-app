@@ -5,7 +5,6 @@ export interface Room {
   password: string;
   visible: boolean;
   members: {
-    userId: string;
     username: string;
     socket: Socket;
   }[];
@@ -26,7 +25,6 @@ export interface roomForMembers {
   password: string;
   visible: boolean;
   members: {
-    userId: string;
     username: string;
     socketId: string;
   }[];

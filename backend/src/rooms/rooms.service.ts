@@ -6,7 +6,6 @@ import { Room, roomForMembers, roomForUsers, Response } from './interfaces/rooms
 export class RoomsService {
   private readonly rooms: Room[] = [];
   private lastChatMessageId = 0;
-  private lastUserId = 0;
   private cutRoomForMember(room): roomForMembers {
     return {
       id: room.id,
@@ -14,7 +13,6 @@ export class RoomsService {
       password: room.password,
       visible: room.visible,
       members: room.members.map(member => ({
-        userId: member.userId,
         username: member.username,
         socketId: member.socket.id,
       })),
@@ -70,10 +68,8 @@ export class RoomsService {
   addToRoom(socket: Socket, roomId: string, password: string, username: string): Response<roomForMembers> {
     const room = this.rooms.find(room => room.id === roomId);
     if (!room) return { error: 'There is no room with this id' };
-    console.log(room.password, password);
     if (room.password !== password) return { error: 'Wrong password' };
     room.members.push({
-      userId: this.getUserId() + '',
       username: username,
       socket: socket,
     });
@@ -90,10 +86,10 @@ export class RoomsService {
       }
     }
   }
-  findUsersRoom(userId: string) {
+  findUsersRoom(socketId: string) {
     for (const room of this.rooms) {
       for (const member of room.members) {
-        if (member.userId === userId) return room;
+        if (member.socket.id === socketId) return room;
       }
     }
     return false;
@@ -116,9 +112,5 @@ export class RoomsService {
   getChatMessageId() {
     this.lastChatMessageId += 1;
     return this.lastChatMessageId;
-  }
-  getUserId() {
-    this.lastUserId += 1;
-    return this.lastUserId;
   }
 }

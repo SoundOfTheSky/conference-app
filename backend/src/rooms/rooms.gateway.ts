@@ -10,7 +10,7 @@ import {
 import { Logger } from '@nestjs/common';
 import { Socket, Server } from 'socket.io';
 
-@WebSocketGateway(3001)
+@WebSocketGateway()
 export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   constructor(private readonly roomsService: RoomsService) {}
   @WebSocketServer() server: Server;
@@ -41,24 +41,12 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     } else this.server.to(payload.id).emit('roomChange', answer);
   }
   @SubscribeMessage('RTCSendDescription')
-  RTCSendDescription(socket: Socket, payload: { id1: string; id2: string; roomId: string; offer: any }) {
-    const room = this.roomsService.getRoomForMembers(payload.roomId);
-    if (!room) return false;
-    const member = room.members.find(member => member.userId === payload.id2);
-    if (!member) return false;
-    this.server
-      .to(member.socketId)
-      .emit('RTCSendDescription', { offer: payload.offer, id1: payload.id1, id2: payload.id2 });
+  RTCSendDescription(socket: Socket, payload: { socketId: string; offer: any }) {
+    this.server.to(payload.socketId).emit('RTCSendDescription', { offer: payload.offer, sender: socket.id });
   }
   @SubscribeMessage('RTCSendCandidate')
-  RTCSendCandidate(socket: Socket, payload: { id1: string; id2: string; roomId: string; candidate: any }) {
-    const room = this.roomsService.getRoomForMembers(payload.roomId);
-    if (!room) return false;
-    const member = room.members.find(member => member.userId === payload.id2);
-    if (!member) return false;
-    this.server
-      .to(member.socketId)
-      .emit('RTCSendCandidate', { candidate: payload.candidate, id1: payload.id1, id2: payload.id2 });
+  RTCSendCandidate(socket: Socket, payload: { socketId: string; candidate: any }) {
+    this.server.to(payload.socketId).emit('RTCSendCandidate', { candidate: payload.candidate, sender: socket.id });
   }
   afterInit() {
     this.logger.log('Init');
@@ -71,7 +59,7 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     this.logger.log(`Client disconnected: ${socket.id}`);
   }
 
-  handleConnection(client: Socket) {
-    this.logger.log(`Client connected: ${client.id}`);
+  handleConnection(socket: Socket) {
+    this.logger.log(`Client connected: ${socket.id}`);
   }
 }
