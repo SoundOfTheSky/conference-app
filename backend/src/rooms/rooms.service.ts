@@ -15,6 +15,7 @@ export class RoomsService {
       members: room.members.map(member => ({
         username: member.username,
         socketId: member.socket.id,
+        avatar: member.avatar,
       })),
     };
   }
@@ -65,15 +66,19 @@ export class RoomsService {
     });
     return true;
   }
-  addToRoom(socket: Socket, roomId: string, password: string, username: string): Response<roomForMembers> {
-    const room = this.rooms.find(room => room.id === roomId);
+  addToRoom(
+    socket: Socket,
+    payload: { roomId: string; password: string; username: string; avatar: string },
+  ): Response<roomForMembers> {
+    const room = this.rooms.find(room => room.id === payload.roomId);
     if (!room) return { error: 'There is no room with this id' };
-    if (room.password !== password) return { error: 'Wrong password' };
+    if (room.password !== payload.password) return { error: 'Wrong password' };
     room.members.push({
-      username: username,
+      username: payload.username,
       socket: socket,
+      avatar: payload.avatar,
     });
-    socket.join(roomId);
+    socket.join(payload.roomId);
     return this.cutRoomForMember(room);
   }
   removeAnyRoom(socket: Socket) {

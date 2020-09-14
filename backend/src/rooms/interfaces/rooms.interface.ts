@@ -7,6 +7,7 @@ export interface Room {
   members: {
     username: string;
     socket: Socket;
+    avatar: string;
   }[];
 }
 
@@ -27,6 +28,7 @@ export interface roomForMembers {
   members: {
     username: string;
     socketId: string;
+    avatar: string;
   }[];
 }
 export type Response<T> = (T & Partial<ErrorMessage>) | (Partial<T> & ErrorMessage);

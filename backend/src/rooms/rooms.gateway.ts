@@ -17,8 +17,10 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   private logger: Logger = new Logger('AppGateway');
 
   @SubscribeMessage('joinRoom')
-  joinRoom(socket: Socket, payload: { roomId: string; password: string; username: string }) {
-    const room = this.roomsService.addToRoom(socket, payload.roomId, payload.password, payload.username);
+  joinRoom(socket: Socket, payload: { roomId: string; password: string; username: string; avatar: string }) {
+    if (payload.avatar && payload.avatar.length > ((1024 * 1024 * 8) / 3) * 4)
+      return { error: 'File size is too big. Must be 8mb or less.' };
+    const room = this.roomsService.addToRoom(socket, payload);
     if (!room) return false;
     if (!room.error) this.server.to(room.id).emit('roomChange', room);
     return room;

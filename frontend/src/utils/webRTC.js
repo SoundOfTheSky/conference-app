@@ -1,3 +1,4 @@
+import config from '../config';
 const { RTCPeerConnection, RTCSessionDescription } = window;
 export let peers = {};
 export let stream = null;
@@ -7,7 +8,7 @@ export let onDisconnect = null;
 export function getRTCPeerConnection(socketId) {
   if (peers[socketId]) return peers[socketId];
   console.log('crateNewPeer', socketId, Object.keys(peers));
-  peers[socketId] = new RTCPeerConnection();
+  peers[socketId] = new RTCPeerConnection(config.RTCConfig);
   peers[socketId].ontrack = ({ streams: [stream] }) => onTrack(socketId, stream);
   peers[socketId].onconnectionstatechange = () => {
     if (['disconnected', 'failed', 'closed'].includes(peers[socketId].connectionState)) {
@@ -65,7 +66,7 @@ export async function connectToUser(socketId) {
 }
 export function closePeer(socketId) {
   if (peers[socketId]) peers[socketId].close();
-  peers[socketId] = null;
+  delete peers[socketId];
 }
 export function closeAllPeers() {
   Object.values(peers).forEach(peer => peer.close());
