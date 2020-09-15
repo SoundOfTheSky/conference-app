@@ -6,6 +6,7 @@ export default {
   data: function() {
     return {
       room: null,
+      members: {},
       chatMessage: '',
       messages: [],
       sideBarTab: 'chat',
@@ -50,13 +51,12 @@ export default {
           roomId: this.$route.params.id,
           password: this.loginForm.password,
           username: this.loginForm.username,
-          avatar: this.loginForm.avatar,
         },
         response => {
           this.loginForm.loading = false;
           if (!response) return (this.loginForm.loginError = 'But nobody came...');
           if (response.error) return (this.loginForm.loginError = response.error);
-          this.room = response;
+          this.roomChange(response);
           this.registerEvents();
         },
       );
@@ -90,10 +90,27 @@ export default {
       this.messages.push(data);
       this.chatMessage = '';
     },
-    registerEvents() {
-      this.socket.on('roomChange', room => {
-        this.room = room;
+    roomChange(room) {
+      this.room = room;
+      const memberIds = this.room.members.map(member => member.socketId);
+      Object.keys(this.members).forEach(key => {
+        const i = memberIds.indexOf(key);
+        if (i === -1) delete this.members[key];
+        else memberIds.splice(i, 1);
       });
+      memberIds.forEach(
+        memberId =>
+          (this.members[memberId] = {
+            connection: false,
+          }),
+      );
+      this.members[this.socket.id] = {
+        avatar: this.loginForm.avatar,
+        connection: true,
+      };
+    },
+    registerEvents() {
+      this.socket.on('roomChange', this.roomChange);
       this.updateMedia();
     },
     async updateDevices() {
@@ -112,7 +129,6 @@ export default {
       console.log('stream stopped: ' + socketId);
     },
     onMessage(payload) {
-      console.log(payload);
       switch (payload.event) {
         case 'chatMessage':
           this.messages.push(payload.data);
@@ -120,9 +136,17 @@ export default {
             this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight;
           });
           break;
-        default:
+        case 'avatar':
+          this.members = {
+            ...this.members,
+            [payload.data.socketId]: { connection: true, avatar: payload.data.avatar },
+          };
+          console.log(this.members);
           break;
       }
+    },
+    onConnection(socketId) {
+      webRTC.send(socketId, { event: 'avatar', data: { avatar: this.loginForm.avatar, socketId: this.socket.id } });
     },
     async updateMedia() {
       await this.updateDevices();
@@ -155,7 +179,6 @@ export default {
           frameRate: 30,
         };
       }
-      console.log('Set constraints: ', constraints);
       const newConnection = !webRTC.stream;
       if (!newConnection) webRTC.stopStream();
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -163,7 +186,7 @@ export default {
       stream.getVideoTracks()[0].enabled = this.video;
       this.$refs['video_' + this.socket.id][0].srcObject = stream;
       if (newConnection) {
-        webRTC.register(this.socket, stream, this.onNewStream, this.onMessage, this.onStreamStop);
+        webRTC.register(this.socket, stream, this.onNewStream, this.onMessage, this.onStreamStop, this.onConnection);
         this.room.members.forEach(
           async member => member.socketId !== this.socket.id && webRTC.getRTCPeerConnection(member.socketId),
         );
@@ -258,8 +281,11 @@ export default {
       <div class="playground">
         <div class="members">
           <div class="member" v-for="member in room.members" :key="member.socketId">
-            <img :src="member.avatar" class="avatar" />
-            <video autoplay :muted="member.socketId === socket.id" :ref="'video_' + member.socketId" />
+            <template v-show="members[member.socketId].connection">
+              <img :src="members[member.socketId].avatar" class="avatar" />
+              <video autoplay :muted="member.socketId === socket.id" :ref="'video_' + member.socketId" />
+            </template>
+            <div v-if="!members[member.socketId].connection" style="color: #fff">LOADING...</div>
             <span> {{ member.username }}</span>
           </div>
         </div>
@@ -324,7 +350,6 @@ export default {
     align-items: center;
     justify-content: center;
     .dropzone {
-      width: 128px;
       height: 128px;
     }
     & > * {

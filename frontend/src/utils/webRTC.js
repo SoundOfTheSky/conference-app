@@ -1,5 +1,6 @@
 import config from '../config';
 const { RTCPeerConnection, RTCSessionDescription } = window;
+const MAX_CHANNEL_DATA_SIZE = 32768;
 export let peers = {};
 export let dataChannels = {};
 export let stream = null;
@@ -7,17 +8,29 @@ export let socket = null;
 export let onTrack = null;
 export let onMessage = null;
 export let onDisconnect = null;
+export let onConnection = null;
+let dataChannelInputStreams = {};
 export function getRTCPeerConnection(socketId, connectTo) {
   if (peers[socketId]) return peers[socketId];
-  console.log('crateNewPeer', socketId);
   peers[socketId] = new RTCPeerConnection(config.RTCConfig);
   stream.getTracks().forEach(track => peers[socketId].addTrack(track, stream));
   dataChannels[socketId] = peers[socketId].createDataChannel('main', { negotiated: true, id: 0 });
-  dataChannels[socketId].onmessage = e => onMessage(JSON.parse(e.data));
+  dataChannels[socketId].onmessage = e => {
+    const data = JSON.parse(e.data);
+    if (data.id !== undefined) {
+      if (!dataChannelInputStreams[data.id]) dataChannelInputStreams[data.id] = '';
+      dataChannelInputStreams[data.id] += data.data;
+      if (data.lastPiece) {
+        onMessage(JSON.parse(dataChannelInputStreams[data.id]));
+        delete dataChannelInputStreams[data.id];
+      }
+    } else onMessage(data);
+  };
+  dataChannels[socketId].onopen = () => onConnection(socketId);
   peers[socketId].ontrack = e => onTrack(socketId, e.streams[0]);
   peers[socketId].onconnectionstatechange = () => {
     if (['disconnected', 'failed', 'closed'].includes(peers[socketId].connectionState)) {
-      console.log('disconnected wiht status: ' + peers[socketId].connectionState);
+      console.log('disconnected with status: ' + peers[socketId].connectionState);
       closePeer(socketId);
       onDisconnect(socketId);
     }
@@ -60,14 +73,30 @@ export function broadcast(data) {
   });
 }
 export function send(socketId, payload) {
-  dataChannels[socketId].send(JSON.stringify(payload));
+  const data = JSON.stringify(payload);
+  if (data.length > MAX_CHANNEL_DATA_SIZE) {
+    const id = Math.floor(Math.random() * 1000000) + '';
+    let offset = 0;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (offset + MAX_CHANNEL_DATA_SIZE > data.length) {
+        dataChannels[socketId].send(
+          JSON.stringify({ id, data: data.slice(offset, offset + MAX_CHANNEL_DATA_SIZE), lastPiece: true }),
+        );
+        break;
+      }
+      dataChannels[socketId].send(JSON.stringify({ id, data: data.slice(offset, offset + MAX_CHANNEL_DATA_SIZE) }));
+      offset += MAX_CHANNEL_DATA_SIZE;
+    }
+  } else dataChannels[socketId].send(data);
 }
-export async function register(mySocket, myStream, myOntrack, myOnMessage, myOnDisconnect) {
+export async function register(mySocket, myStream, myOntrack, myOnMessage, myOnDisconnect, myOnConnection) {
   stream = myStream;
   socket = mySocket;
   onTrack = myOntrack;
   onMessage = myOnMessage;
   onDisconnect = myOnDisconnect;
+  onConnection = myOnConnection;
   socket.on('RTCSendDescription', async payload => {
     const peer = getRTCPeerConnection(payload.sender, true);
     await peer.setRemoteDescription(new RTCSessionDescription(payload.offer));
