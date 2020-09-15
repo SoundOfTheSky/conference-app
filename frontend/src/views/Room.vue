@@ -11,6 +11,7 @@ export default {
       sideBarTab: 'chat',
       audio: true,
       video: false,
+      enabledVideo: {},
       deviceSettings: {
         selectedAudioinput: localStorage.getItem('selectedAudioinput'),
         selectedVideoinput: localStorage.getItem('selectedVideoinput'),
@@ -78,20 +79,18 @@ export default {
         });
     },
     sendChatMessage() {
-      this.socket.emit('sendChatMessage', {
-        roomId: this.$route.params.id,
+      const data = {
         text: this.chatMessage,
         username: this.loginForm.username,
+      };
+      webRTC.broadcast({
+        event: 'chatMessage',
+        data,
       });
+      this.messages.push(data);
       this.chatMessage = '';
     },
     registerEvents() {
-      this.socket.on('sendChatMessage', msg => {
-        this.messages.push(msg);
-        this.$nextTick(function() {
-          this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight;
-        });
-      });
       this.socket.on('roomChange', room => {
         this.room = room;
       });
@@ -112,12 +111,23 @@ export default {
     onStreamStop(socketId) {
       console.log('stream stopped: ' + socketId);
     },
+    onMessage(payload) {
+      console.log(payload);
+      switch (payload.event) {
+        case 'chatMessage':
+          this.messages.push(payload.data);
+          this.$nextTick(function() {
+            this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight;
+          });
+          break;
+        default:
+          break;
+      }
+    },
     async updateMedia() {
-      webRTC.closeAllPeers();
-      webRTC.stopStream();
       await this.updateDevices();
       const constraints = {};
-      if (this.audio && this.devices.audioinput.length) {
+      if (this.devices.audioinput.length) {
         let deviceId = this.deviceSettings.selectedAudioinput;
         if (!this.devices.audioinput.find(el => el.deviceId === deviceId)) {
           const defaultDevice = this.devices.audioinput.find(el => el.deviceId === 'default');
@@ -131,7 +141,7 @@ export default {
           noiseSuppression: this.deviceSettings.noiseSuppression,
         };
       }
-      if (this.video && this.devices.videoinput.length) {
+      if (this.devices.videoinput.length) {
         let deviceId = this.deviceSettings.selectedVideoinput;
         if (!this.devices.videoinput.find(el => el.deviceId === deviceId)) {
           const defaultDevice = this.devices.videoinput.find(el => el.deviceId === 'default');
@@ -146,26 +156,48 @@ export default {
         };
       }
       console.log('Set constraints: ', constraints);
+      const newConnection = !webRTC.stream;
+      if (!newConnection) webRTC.stopStream();
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      stream.getAudioTracks()[0].enabled = this.audio;
+      stream.getVideoTracks()[0].enabled = this.video;
       this.$refs['video_' + this.socket.id][0].srcObject = stream;
-      webRTC.register(this.socket, stream, this.onNewStream, this.onStreamStop);
-      this.room.members.forEach(
-        async member => member.socketId !== this.socket.id && webRTC.connectToUser(member.socketId),
-      );
+      if (newConnection) {
+        webRTC.register(this.socket, stream, this.onNewStream, this.onMessage, this.onStreamStop);
+        this.room.members.forEach(
+          async member => member.socketId !== this.socket.id && webRTC.getRTCPeerConnection(member.socketId),
+        );
+      } else webRTC.changeStream(stream);
     },
     toggleAudio() {
       this.audio = !this.audio;
-      this.updateMedia();
+      webRTC.stream.getAudioTracks()[0].enabled = this.audio;
     },
     toggleVideo() {
       this.video = !this.video;
-      this.updateMedia();
+      webRTC.stream.getVideoTracks()[0].enabled = this.video;
     },
     async dropAvatar(e) {
       const image = await toBase64(e.dataTransfer.files[0]);
       if (image.length * 0.75 > 1024 * 1024 * 8)
         return (this.loginForm.loginError = 'File size is too big. It must be 8mb or less.');
       this.loginForm.avatar = image;
+    },
+    updateUserVideo() {
+      Object.keys(this.$refs).forEach(ref => {
+        if (!ref.startsWith('video_')) return;
+        let video = this.$refs[ref];
+        if (!video || !video[0]) return;
+        const canvas = document.createElement('canvas');
+        canvas.width = 1;
+        canvas.height = 1;
+        const context = canvas.getContext('2d');
+        context.drawImage(video[0], 0, 0, 1, 1);
+        const i = context.getImageData(0, 0, 1, 1).data;
+        if (i[0] === 0 && i[1] === 0 && i[2] === 0) video[0].style.opacity = 0;
+        else video[0].style.opacity = 1;
+      });
+      return;
     },
   },
   computed: {
@@ -181,6 +213,7 @@ export default {
       if (!room) this.loginForm.needCreation = true;
       else this.loginForm.needPassword = room.needPassword;
     });
+    setInterval(this.updateUserVideo, 5000);
   },
   beforeDestroy() {
     if (this.socket) this.$store.dispatch('disconnectSocket');
