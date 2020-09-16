@@ -13,12 +13,13 @@ export default {
       audio: true,
       video: false,
       enabledVideo: {},
+      deviceSettingsOpen: false,
       deviceSettings: {
         selectedAudioinput: localStorage.getItem('selectedAudioinput'),
         selectedVideoinput: localStorage.getItem('selectedVideoinput'),
-        autoGainControl: localStorage.getItem('autoGainControl') || true,
-        echoCancellation: localStorage.getItem('echoCancellation') || true,
-        noiseSuppression: localStorage.getItem('noiseSuppression') || true,
+        autoGainControl: !(localStorage.getItem('autoGainControl') === 'false'),
+        echoCancellation: !(localStorage.getItem('echoCancellation') === 'false'),
+        noiseSuppression: !(localStorage.getItem('noiseSuppression') === 'false'),
       },
       devices: {
         audioinput: [],
@@ -26,9 +27,9 @@ export default {
         videoinput: [],
       },
       loginForm: {
-        avatar: localStorage.getItem('avatar'),
+        avatar: localStorage.getItem('avatar') || '',
         name: '',
-        username: localStorage.getItem('username'),
+        username: localStorage.getItem('username') || '',
         password: '',
         visible: true,
         needPassword: true,
@@ -56,6 +57,8 @@ export default {
           this.loginForm.loading = false;
           if (!response) return (this.loginForm.loginError = 'But nobody came...');
           if (response.error) return (this.loginForm.loginError = response.error);
+          localStorage.setItem('avatar', this.loginForm.avatar);
+          localStorage.setItem('username', this.loginForm.username);
           this.roomChange(response);
           this.registerEvents();
         },
@@ -101,12 +104,13 @@ export default {
       memberIds.forEach(
         memberId =>
           (this.members[memberId] = {
-            connection: false,
+            avatar: '',
+            video: false,
           }),
       );
       this.members[this.socket.id] = {
         avatar: this.loginForm.avatar,
-        connection: true,
+        video: this.video,
       };
     },
     registerEvents() {
@@ -121,6 +125,8 @@ export default {
       };
       const devices = await navigator.mediaDevices.enumerateDevices();
       devices.forEach(device => this.devices[device.kind].push(device));
+      if (!this.devices.audioinput.length) this.audio = undefined;
+      if (!this.devices.videoinput.length) this.video = undefined;
     },
     onNewStream(socketId, stream) {
       this.$refs['video_' + socketId][0].srcObject = stream;
@@ -139,14 +145,26 @@ export default {
         case 'avatar':
           this.members = {
             ...this.members,
-            [payload.data.socketId]: { connection: true, avatar: payload.data.avatar },
+            [payload.data.socketId]: {
+              ...this.members[payload.data.socketId],
+              avatar: payload.data.avatar,
+            },
           };
-          console.log(this.members);
+          break;
+        case 'toggleVideo':
+          this.members = {
+            ...this.members,
+            [payload.data.socketId]: {
+              ...this.members[payload.data.socketId],
+              video: payload.data.video,
+            },
+          };
           break;
       }
     },
     onConnection(socketId) {
       webRTC.send(socketId, { event: 'avatar', data: { avatar: this.loginForm.avatar, socketId: this.socket.id } });
+      webRTC.send(socketId, { event: 'toggleVideo', data: { socketId: this.socket.id, video: this.video } });
     },
     async updateMedia() {
       await this.updateDevices();
@@ -179,6 +197,11 @@ export default {
           frameRate: 30,
         };
       }
+      localStorage.setItem('selectedAudioinput', this.deviceSettings.selectedAudioinput);
+      localStorage.setItem('selectedVideoinput', this.deviceSettings.selectedVideoinput);
+      localStorage.setItem('autoGainControl', this.deviceSettings.autoGainControl);
+      localStorage.setItem('echoCancellation', this.deviceSettings.echoCancellation);
+      localStorage.setItem('noiseSuppression', this.deviceSettings.noiseSuppression);
       const newConnection = !webRTC.stream;
       if (!newConnection) webRTC.stopStream();
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -199,6 +222,8 @@ export default {
     toggleVideo() {
       this.video = !this.video;
       webRTC.stream.getVideoTracks()[0].enabled = this.video;
+      webRTC.broadcast({ event: 'toggleVideo', data: { socketId: this.socket.id, video: this.video } });
+      this.members[this.socket.id].video = this.video;
     },
     async dropAvatar(e) {
       const image = await toBase64(e.dataTransfer.files[0]);
@@ -236,7 +261,6 @@ export default {
       if (!room) this.loginForm.needCreation = true;
       else this.loginForm.needPassword = room.needPassword;
     });
-    setInterval(this.updateUserVideo, 5000);
   },
   beforeDestroy() {
     if (this.socket) this.$store.dispatch('disconnectSocket');
@@ -281,22 +305,73 @@ export default {
       <div class="playground">
         <div class="members">
           <div class="member" v-for="member in room.members" :key="member.socketId">
-            <template v-show="members[member.socketId].connection">
-              <img :src="members[member.socketId].avatar" class="avatar" />
-              <video autoplay :muted="member.socketId === socket.id" :ref="'video_' + member.socketId" />
-            </template>
-            <div v-if="!members[member.socketId].connection" style="color: #fff">LOADING...</div>
+            <img
+              v-if="members[member.socketId].avatar && !members[member.socketId].video"
+              :src="members[member.socketId].avatar"
+              class="avatar"
+            />
+            <div v-if="!members[member.socketId].avatar" style="color: #fff">LOADING AVATAR...</div>
+            <video
+              v-show="members[member.socketId].video"
+              autoplay
+              :muted="member.socketId === socket.id"
+              :ref="'video_' + member.socketId"
+            />
             <span> {{ member.username }}</span>
           </div>
         </div>
         <div class="actions">
-          <div v-if="audio !== undefined" @click="toggleAudio" :style="{ background: audio ? 'green' : 'red' }">
-            Audio
+          <template v-if="deviceSettingsOpen">
+            <div class="line">
+              <select v-model="deviceSettings.selectedAudioinput" @change="updateMedia">
+                <option :value="null">Auto</option>
+                <option v-for="device in devices.audioinput" :value="device.deviceId" :key="device.deviceId">{{
+                  device.label
+                }}</option>
+              </select>
+              <select v-model="deviceSettings.selectedVideoinput" @change="updateMedia">
+                <option :value="null">Auto</option>
+                <option v-for="device in devices.videoinput" :value="device.deviceId" :key="device.deviceId">{{
+                  device.label
+                }}</option>
+              </select>
+            </div>
+            <div class="line">
+              <label
+                ><input type="checkbox" v-model="deviceSettings.autoGainControl" @change="updateMedia" />Auto gain
+                control</label
+              >
+              <label
+                ><input type="checkbox" v-model="deviceSettings.echoCancellation" @change="updateMedia" />Echo
+                cancellation</label
+              >
+              <label
+                ><input type="checkbox" v-model="deviceSettings.noiseSuppression" @change="updateMedia" />Noise
+                suppression</label
+              >
+            </div>
+            <div class="line button" @click="deviceSettingsOpen = false">Close settings</div>
+          </template>
+          <div class="line" v-else>
+            <div
+              v-if="audio !== undefined"
+              @click="toggleAudio"
+              :style="{ background: audio ? 'green' : 'red' }"
+              class="button"
+            >
+              Audio
+            </div>
+            <div
+              v-if="video !== undefined"
+              @click="toggleVideo"
+              :style="{ background: video ? 'green' : 'red' }"
+              class="button"
+            >
+              Video
+            </div>
+            <div @click="$router.push({ path: '../rooms' })" class="button">Disconnect</div>
+            <div @click="deviceSettingsOpen = true" class="button">Settings</div>
           </div>
-          <div v-if="video !== undefined" @click="toggleVideo" :style="{ background: video ? 'green' : 'red' }">
-            Video
-          </div>
-          <div @click="$router.push({ path: '../rooms' })">Disconnect</div>
         </div>
       </div>
       <div class="sidebar">
@@ -333,6 +408,12 @@ export default {
           <div>
             <span>Password:</span>
             <input v-model="room.password" @change="settingsChange" />
+          </div>
+          <div>
+            <label
+              ><input type="checkbox" v-model="room.visible" @change="settingsChange" />Is room visible in rooms
+              list</label
+            >
           </div>
         </div>
       </div>
@@ -422,16 +503,27 @@ export default {
     position: relative;
     .actions {
       position: absolute;
-      bottom: 16px;
-      left: 0;
-      width: 100%;
-      display: flex;
-      justify-content: center;
-      & > * {
-        margin: 0 8px;
-        padding: 4px 8px;
+      bottom: 0;
+      left: 50%;
+      min-width: 50%;
+      transform: translateX(-50%);
+      background: #fff;
+      box-shadow: 0 0 12px rgba(0, 0, 0, 0.3);
+      border-radius: 20px 20px 0 0;
+      .button {
+        transition: 0.5s;
         cursor: pointer;
-        border-radius: 20px;
+        &:hover {
+          background: rgba(0, 0, 0, 0.3);
+        }
+      }
+      .line {
+        padding: 8px;
+        display: flex;
+        justify-content: space-evenly;
+      }
+      .line.button {
+        border-top: 1px solid black;
       }
     }
     .members {
