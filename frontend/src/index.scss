@@ -1,0 +1,15 @@
+$main: #333333;
+$light: #858585;
+$dark: #252526;
+$darker: #1e1e1e;
+$text: #cccccc;
+input {
+  color: $text;
+  border-radius: 20px;
+  background: $main;
+  border: 2px solid $dark;
+  padding: 2px 8px;
+  &:focus {
+    outline: none;
+  }
+}

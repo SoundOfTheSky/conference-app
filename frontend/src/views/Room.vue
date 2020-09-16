@@ -92,6 +92,9 @@ export default {
       });
       this.messages.push(data);
       this.chatMessage = '';
+      this.$nextTick(function() {
+        this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight;
+      });
     },
     roomChange(room) {
       this.room = room;
@@ -356,7 +359,7 @@ export default {
             <div
               v-if="audio !== undefined"
               @click="toggleAudio"
-              :style="{ background: audio ? 'green' : 'red' }"
+              :style="{ 'text-decoration': audio ? 'unset' : 'line-through' }"
               class="button"
             >
               Audio
@@ -364,7 +367,7 @@ export default {
             <div
               v-if="video !== undefined"
               @click="toggleVideo"
-              :style="{ background: video ? 'green' : 'red' }"
+              :style="{ 'text-decoration': video ? 'unset' : 'line-through' }"
               class="button"
             >
               Video
@@ -376,15 +379,12 @@ export default {
       </div>
       <div class="sidebar">
         <div class="tab">
-          <div
-            @click="sideBarTab = 'chat'"
-            :style="{ background: sideBarTab === 'chat' ? 'rgba(0,0,0,0.2)' : 'white' }"
-          >
+          <div @click="sideBarTab = 'chat'" :style="{ background: sideBarTab === 'chat' ? '#858585' : 'unset' }">
             Chat
           </div>
           <div
             @click="sideBarTab = 'settings'"
-            :style="{ background: sideBarTab === 'settings' ? 'rgba(0,0,0,0.2)' : 'white' }"
+            :style="{ background: sideBarTab === 'settings' ? '#858585' : 'unset' }"
           >
             Settings
           </div>
@@ -421,8 +421,10 @@ export default {
   </div>
 </template>
 <style lang="scss" scoped>
+@import '../index.scss';
 .room {
   display: flex;
+  color: $text;
   .login {
     width: 100%;
     height: 100%;
@@ -449,11 +451,13 @@ export default {
   }
   .sidebar {
     height: 100%;
-    max-height: 100%;
     width: 300px;
+    background: $dark;
     border-left: 1px solid black;
     display: flex;
     flex-direction: column;
+    transition: 0.5s;
+    z-index: 2;
     .tab {
       display: flex;
       border-bottom: 1px solid black;
@@ -469,13 +473,13 @@ export default {
       flex: 1;
       flex-direction: column;
       justify-content: space-between;
-      overflow: auto;
+      overflow: hidden;
       .messages {
         display: flex;
         flex-direction: column;
         width: 100%;
         padding: 20px;
-        overflow-y: scroll;
+        overflow-y: auto;
         height: 100%;
         .message {
           width: 100%;
@@ -496,6 +500,17 @@ export default {
         }
       }
     }
+    @media screen and (max-width: 992px) {
+      height: calc(100% - 32px);
+      position: fixed;
+      top: 0;
+      right: 0;
+      transform: translateX(calc(100% - 16px));
+      width: 90vw;
+      &:hover {
+        transform: translateX(0);
+      }
+    }
   }
   .playground {
     width: 100%;
@@ -506,8 +521,9 @@ export default {
       bottom: 0;
       left: 50%;
       min-width: 50%;
+      max-width: 90%;
       transform: translateX(-50%);
-      background: #fff;
+      background: $main;
       box-shadow: 0 0 12px rgba(0, 0, 0, 0.3);
       border-radius: 20px 20px 0 0;
       .button {
@@ -521,6 +537,12 @@ export default {
         padding: 8px;
         display: flex;
         justify-content: space-evenly;
+        flex-wrap: wrap;
+        & > * {
+          flex: auto;
+          text-align: center;
+          max-width: 40%;
+        }
       }
       .line.button {
         border-top: 1px solid black;
@@ -553,6 +575,14 @@ export default {
           width: 100%;
           text-align: center;
           color: #fff;
+        }
+      }
+      @media screen and (max-width: 992px) {
+        flex-direction: column;
+        align-items: center;
+        .member {
+          width: 90%;
+          margin: 20px 12px 0 0;
         }
       }
     }

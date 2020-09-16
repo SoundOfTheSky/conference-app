@@ -6,7 +6,7 @@ import { Room, roomForMembers, roomForUsers, Response } from './interfaces/rooms
 export class RoomsService {
   private readonly rooms: Room[] = [];
   private lastChatMessageId = 0;
-  private cutRoomForMember(room): roomForMembers {
+  private cutRoomForMember(room: Room): roomForMembers {
     return {
       id: room.id,
       name: room.name,
@@ -18,12 +18,13 @@ export class RoomsService {
       })),
     };
   }
-  private formatRoomForUser(room): roomForUsers {
+  private formatRoomForUser(room: Room): roomForUsers {
     return {
       id: room.id,
       name: room.name,
       visible: room.visible,
       needPassword: room.password !== '',
+      members: Object.values(room.members).map(member => member.username),
     };
   }
   getAll() {
@@ -41,11 +42,11 @@ export class RoomsService {
     let id;
     if (roomData.name === undefined) return { error: 'Room has no name' };
     roomData.name = roomData.name.trim();
-    if (roomData.name.length < 3) return { error: 'Room name must be 3 to 24 characters long' };
-    if (roomData.name.length > 24) return { error: 'Room name must be 3 to 24 characters long' };
+    if (roomData.name.length < 3) return { error: 'Room name must be 3 to 48 characters long' };
+    if (roomData.name.length > 48) return { error: 'Room name must be 3 to 48 characters long' };
     if (roomData.password === undefined) return { error: 'Room has no password' };
     roomData.password = roomData.password.trim();
-    if (roomData.password.length > 24) return { error: 'Password must be less than 24 characters long' };
+    if (roomData.password.length > 48) return { error: 'Password must be less than 48 characters long' };
     if (roomData.id) {
       roomData.id = roomData.id.trim();
       if (this.rooms.find(room => room.id === id)) return { error: 'Room with this id already exists' };
@@ -99,11 +100,11 @@ export class RoomsService {
     if (!room) return { error: 'There is no room with this id' };
     if (name === undefined) return { error: 'Room has no name' };
     name = name.trim();
-    if (name.length < 3) return { error: 'Room name must be 3 to 24 characters long' };
-    if (name.length > 24) return { error: 'Room name must be 3 to 24 characters long' };
+    if (name.length < 3) return { error: 'Room name must be 3 to 48 characters long' };
+    if (name.length > 48) return { error: 'Room name must be 3 to 48 characters long' };
     if (password === undefined) return { error: 'Room has no password' };
     password = password.trim();
-    if (password.length > 24) return { error: 'Password must be less than 24 characters long' };
+    if (password.length > 48) return { error: 'Password must be less than 48 characters long' };
     room.name = name;
     room.password = password;
     room.visible = visible;

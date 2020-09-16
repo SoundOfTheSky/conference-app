@@ -18,6 +18,7 @@ export interface roomForUsers {
   name: string;
   visible: boolean;
   needPassword: boolean;
+  members: string[];
 }
 export interface roomForMembers {
   id: string;
