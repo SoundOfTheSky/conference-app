@@ -266,7 +266,7 @@ export default {
     });
   },
   beforeDestroy() {
-    if (this.socket) this.$store.dispatch('disconnectSocket');
+    this.$store.dispatch('disconnectSocket');
     webRTC.closeAllPeers();
     webRTC.stopStream();
   },
@@ -308,19 +308,17 @@ export default {
       <div class="playground">
         <div class="members">
           <div class="member" v-for="member in room.members" :key="member.socketId">
-            <img
-              v-if="members[member.socketId].avatar && !members[member.socketId].video"
-              :src="members[member.socketId].avatar"
-              class="avatar"
-            />
-            <div v-if="!members[member.socketId].avatar" style="color: #fff">LOADING AVATAR...</div>
+            <img :src="members[member.socketId].avatar || require('../assets/user.png')" class="avatar" />
             <video
               v-show="members[member.socketId].video"
               autoplay
               :muted="member.socketId === socket.id"
               :ref="'video_' + member.socketId"
             />
-            <span> {{ member.username }}</span>
+            <div class="username">
+              <div>{{ member.username }}</div>
+              <div class="skew"></div>
+            </div>
           </div>
         </div>
         <div class="actions">
@@ -568,13 +566,26 @@ export default {
           left: 50%;
           transform: translateX(-50%);
         }
-        span {
+        .username {
+          display: flex;
           position: absolute;
           bottom: 0;
           left: 0;
-          width: 100%;
           text-align: center;
           color: #fff;
+          font-size: 18px;
+          div:first-child {
+            background: $dark;
+            padding: 2px 16px;
+          }
+          .skew {
+            background: $dark;
+            width: 25px;
+            height: 25px;
+            border-right: 8px solid rgb(255, 145, 0);
+            transform: skewX(45deg);
+            transform-origin: bottom;
+          }
         }
       }
       @media screen and (max-width: 992px) {
