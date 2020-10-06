@@ -1,152 +1,180 @@
 /*
   HOW TO SET UP SERVER TO WORK WITH THIS MODULE
 
-  Server must listen to "RTCSendDescription" and send to "socketId" data like {sender: socket.id, offer: offer}
-  Server must listen to "RTCSendCandidate" and send to "socketId" data like {sender: socket.id, candidate: candidate}
+  Server must listen to "RTCSendDescription" and send to "socketId" data like {sender: this.socket.id, offer: offer}
+  Server must listen to "RTCSendCandidate" and send to "socketId" data like {sender: this.socket.id, candidate: candidate}
   Events sent to client has same name as events sent to server
 */
-
-import config from '../config';
+import { EventEmitter } from 'events';
 const { RTCPeerConnection, RTCSessionDescription } = window;
-const MAX_CHANNEL_DATA_SIZE = 32768;
-export let peers = {};
-export let dataChannels = {};
-export let stream = null;
-export let socket = null;
-export let onTrack = null;
-export let onMessage = null;
-export let onDisconnect = null;
-export let onConnection = null;
-let dataChannelInputStreams = {};
-// Register socket, as pairable client
-export async function register(mySocket, myStream, myOntrack, myOnMessage, myOnDisconnect, myOnConnection) {
-  stream = myStream;
-  socket = mySocket;
-  onTrack = myOntrack;
-  onMessage = myOnMessage;
-  onDisconnect = myOnDisconnect;
-  onConnection = myOnConnection;
-  socket.on('RTCSendDescription', async payload => {
-    const peer = getRTCPeerConnection(payload.sender, true);
-    await peer.setRemoteDescription(new RTCSessionDescription(payload.offer));
-    if (payload.offer.type === 'offer') {
-      const answer = await peer.createAnswer();
-      await peer.setLocalDescription(new RTCSessionDescription(answer));
-      socket.emit('RTCSendDescription', {
-        socketId: payload.sender,
-        offer: answer,
-      });
-    }
-  });
-  socket.on('RTCSendCandidate', payload => {
-    if (!payload.candidate) return;
-    const peer = getRTCPeerConnection(payload.sender);
-    const interval = setInterval(() => {
-      if (peer.remoteDescription && peer.remoteDescription.type) {
-        peer.addIceCandidate(payload.candidate);
-        clearInterval(interval);
+export default class webRTC extends EventEmitter {
+  constructor(socket, stream, RTCConfig) {
+    super();
+    this.socket = socket;
+    this.stream = stream;
+    this.RTCConfig = RTCConfig;
+    this.socket.on('RTCSendDescription', async payload => {
+      const peer = this.getRTCPeerConnection(payload.sender, true);
+      await peer.setRemoteDescription(new RTCSessionDescription(payload.offer));
+      if (payload.offer.type === 'offer') {
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(new RTCSessionDescription(answer));
+        this.socket.emit('RTCSendDescription', {
+          socketId: payload.sender,
+          offer: answer,
+        });
       }
-    }, 100);
-  });
-}
-// Get peer, or create new if don't exist
-export function getRTCPeerConnection(socketId, connectTo) {
-  if (peers[socketId]) return peers[socketId];
-  peers[socketId] = new RTCPeerConnection(config.RTCConfig);
-  stream.getTracks().forEach(track => peers[socketId].addTrack(track, stream));
-  dataChannels[socketId] = peers[socketId].createDataChannel('main', { negotiated: true, id: 0 });
-  dataChannels[socketId].onmessage = e => {
-    const data = JSON.parse(e.data);
-    if (data.id !== undefined) {
-      if (!dataChannelInputStreams[data.id]) dataChannelInputStreams[data.id] = '';
-      dataChannelInputStreams[data.id] += data.data;
-      if (data.lastPiece) {
-        onMessage(JSON.parse(dataChannelInputStreams[data.id]));
-        delete dataChannelInputStreams[data.id];
-      }
-    } else onMessage(data);
-  };
-  dataChannels[socketId].onopen = () => onConnection(socketId);
-  peers[socketId].ontrack = e => onTrack(socketId, e.streams[0]);
-  peers[socketId].onconnectionstatechange = () => {
-    if (['disconnected', 'failed', 'closed'].includes(peers[socketId].connectionState)) {
-      console.log('disconnected with status: ' + peers[socketId].connectionState);
-      closePeer(socketId);
-      onDisconnect(socketId);
-    }
-  };
-  peers[socketId].onicecandidate = e => {
-    socket.emit('RTCSendCandidate', {
-      socketId: socketId,
-      candidate: e.candidate,
     });
-  };
-  if (!connectTo) sendDescription(socketId);
-  return peers[socketId];
-}
-// Send content description
-export async function sendDescription(socketId) {
-  const offer = await peers[socketId].createOffer();
-  await peers[socketId].setLocalDescription(new RTCSessionDescription(offer));
-  socket.emit('RTCSendDescription', {
-    socketId: socketId,
-    offer,
-  });
-}
-// Changing stream and reconnecting
-export async function changeStream(myStream) {
-  stream = myStream;
-  Object.keys(peers).forEach(socketId => {
-    const peer = peers[socketId];
-    const senders = peer.getSenders();
-    const tracks = stream.getTracks();
-    const senderAudio = senders.find(el => el.track && el.track.kind === 'audio');
-    const senderVideo = senders.find(el => el.track && el.track.kind === 'video');
-    const trackAudio = tracks.find(el => el.kind === 'audio');
-    const trackVideo = tracks.find(el => el.kind === 'video');
-    if (senderAudio && trackAudio) senderAudio.replaceTrack(trackAudio);
-    if (senderVideo && trackVideo) senderVideo.replaceTrack(trackVideo);
-    sendDescription(socketId);
-  });
-}
-// Send data to every connected peer
-export function broadcast(data) {
-  Object.keys(dataChannels).forEach(socketId => {
-    send(socketId, data);
-  });
-}
-// Send data to exact peer
-export function send(socketId, payload) {
-  const data = JSON.stringify(payload);
-  if (data.length > MAX_CHANNEL_DATA_SIZE) {
-    const id = Math.floor(Math.random() * 1000000) + '';
-    let offset = 0;
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      if (offset + MAX_CHANNEL_DATA_SIZE > data.length) {
-        dataChannels[socketId].send(
-          JSON.stringify({ id, data: data.slice(offset, offset + MAX_CHANNEL_DATA_SIZE), lastPiece: true }),
-        );
-        break;
-      }
-      dataChannels[socketId].send(JSON.stringify({ id, data: data.slice(offset, offset + MAX_CHANNEL_DATA_SIZE) }));
-      offset += MAX_CHANNEL_DATA_SIZE;
-    }
-  } else dataChannels[socketId].send(data);
-}
-// Close exact peer
-export function closePeer(socketId) {
-  if (dataChannels[socketId]) dataChannels[socketId].close();
-  if (peers[socketId]) peers[socketId].close();
-  delete peers[socketId];
-}
-// Self explanatory
-export function closeAllPeers() {
-  Object.values(peers).forEach(peer => peer.close());
+    this.socket.on('RTCSendCandidate', payload => {
+      if (!payload.candidate) return;
+      const peer = this.getRTCPeerConnection(payload.sender);
+      const interval = setInterval(() => {
+        if (peer.remoteDescription && peer.remoteDescription.type) {
+          peer.addIceCandidate(payload.candidate);
+          clearInterval(interval);
+        }
+      }, 100);
+    });
+  }
   peers = {};
-}
-// Stop current stream
-export function stopStream() {
-  if (stream) stream.getTracks().forEach(track => track.stop());
-  stream = null;
+  dataChannels = {};
+  stream = {};
+  socket = {};
+  dataChannelInputStreams = {};
+  MAX_CHANNEL_DATA_SIZE = 32768;
+  RTCConfig = {};
+  // connect to socket. Returns promise that resolves then connected
+  connect(socketId) {
+    return new Promise((r, j) => {
+      function onDisconnect(sid) {
+        if (socketId !== sid) return;
+        this.removeListener('connected', onConnect);
+        j();
+      }
+      function onConnect(sid) {
+        if (socketId !== sid) return;
+        this.removeListener('disconnected', onDisconnect);
+        r();
+      }
+      if (
+        this.peers[socketId] &&
+        this.peers[socketId].connectionState === 'connected' &&
+        this.dataChannels[socketId].readyState === 'open'
+      )
+        r();
+      else {
+        this.once('disconnected', onDisconnect);
+        this.once('connected', onConnect);
+        this.getRTCPeerConnection(socketId);
+      }
+    });
+  }
+  // Get peer, or create new if don't exist
+  getRTCPeerConnection(socketId, dontSendDescription) {
+    const onConnected = () => {
+      if (this.peers[socketId].connectionState === 'connected' && this.dataChannels[socketId].readyState === 'open')
+        this.emit('connected', socketId);
+    };
+    if (this.peers[socketId]) return this.peers[socketId];
+    this.peers[socketId] = new RTCPeerConnection(this.RTCConfig);
+    if (!this.dataChannels[socketId]) {
+      this.dataChannels[socketId] = this.peers[socketId].createDataChannel('main', { negotiated: true, id: 0 });
+      this.dataChannels[socketId].onmessage = e => {
+        const data = JSON.parse(e.data);
+        if (data.id === undefined) return this.emit('message', { ...data, socketId });
+        if (!this.dataChannelInputStreams[data.id]) this.dataChannelInputStreams[data.id] = '';
+        this.dataChannelInputStreams[data.id] += data.data;
+        if (data.lastPiece) {
+          this.emit('message', { ...JSON.parse(this.dataChannelInputStreams[data.id]), socketId });
+          delete this.dataChannelInputStreams[data.id];
+        }
+      };
+      this.dataChannels[socketId].onopen = onConnected;
+      this.dataChannels[socketId].onerror = () => this.closePeer(socketId);
+      this.dataChannels[socketId].onclose = () => this.closePeer(socketId);
+    }
+    this.stream.getTracks().forEach(track => this.peers[socketId].addTrack(track, this.stream));
+    this.peers[socketId].ontrack = e => this.emit('stream', { socketId, stream: e.streams[0] });
+    this.peers[socketId].onconnectionstatechange = () => {
+      if (['disconnected', 'failed', 'closed'].includes(this.peers[socketId].connectionState)) {
+        this.closePeer(socketId);
+        this.emit('disconnected', socketId);
+      } else onConnected();
+    };
+    this.peers[socketId].onicecandidate = e => {
+      this.socket.emit('RTCSendCandidate', {
+        socketId: socketId,
+        candidate: e.candidate,
+      });
+    };
+    if (!dontSendDescription) this.sendDescription(socketId);
+    return this.peers[socketId];
+  }
+  // Send content description
+  async sendDescription(socketId) {
+    const offer = await this.peers[socketId].createOffer();
+    await this.peers[socketId].setLocalDescription(new RTCSessionDescription(offer));
+    this.socket.emit('RTCSendDescription', {
+      socketId: socketId,
+      offer,
+    });
+  }
+  // Changing this.stream and reconnecting
+  async changeStream(myStream) {
+    this.stream = myStream;
+    Object.keys(this.peers).forEach(socketId => {
+      const peer = this.peers[socketId];
+      const senders = peer.getSenders();
+      const tracks = this.stream.getTracks();
+      const senderAudio = senders.find(el => el.track && el.track.kind === 'audio');
+      const senderVideo = senders.find(el => el.track && el.track.kind === 'video');
+      const trackAudio = tracks.find(el => el.kind === 'audio');
+      const trackVideo = tracks.find(el => el.kind === 'video');
+      if (senderAudio && trackAudio) senderAudio.replaceTrack(trackAudio);
+      if (senderVideo && trackVideo) senderVideo.replaceTrack(trackVideo);
+      this.sendDescription(socketId);
+    });
+  }
+  // Send data to every connected peer
+  broadcast(data) {
+    Object.keys(this.dataChannels).forEach(socketId => this.send(socketId, data));
+  }
+  // Send data to exact peer
+  send(socketId, payload) {
+    const data = JSON.stringify(payload);
+    if (data.length > this.MAX_CHANNEL_DATA_SIZE) {
+      const id = Math.floor(Math.random() * 1000000) + '';
+      let offset = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        if (offset + this.MAX_CHANNEL_DATA_SIZE > data.length) {
+          this.dataChannels[socketId].send(
+            JSON.stringify({ id, data: data.slice(offset, offset + this.MAX_CHANNEL_DATA_SIZE), lastPiece: true }),
+          );
+          break;
+        }
+        this.dataChannels[socketId].send(
+          JSON.stringify({ id, data: data.slice(offset, offset + this.MAX_CHANNEL_DATA_SIZE) }),
+        );
+        offset += this.MAX_CHANNEL_DATA_SIZE;
+      }
+    } else this.dataChannels[socketId].send(data);
+  }
+  // Close exact peer
+  closePeer(socketId) {
+    if (this.dataChannels[socketId]) this.dataChannels[socketId].close();
+    delete this.dataChannels[socketId];
+    if (this.peers[socketId]) this.peers[socketId].close();
+    delete this.peers[socketId];
+  }
+  // Self explanatory
+  closeAllPeers() {
+    Object.values(this.peers).forEach(peer => peer.close());
+    this.peers = {};
+  }
+  // Stop current this.stream
+  stopStream() {
+    if (this.stream) this.stream.getTracks().forEach(track => track.stop());
+    this.stream = null;
+  }
 }

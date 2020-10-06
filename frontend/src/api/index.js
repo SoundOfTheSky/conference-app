@@ -1,6 +1,7 @@
 import axios from 'axios';
 import io from 'socket.io-client';
 import config from '../config';
+import store from '../store';
 const host = config.protocol + config.host + config.port + '/api/';
 function getConstructor(url) {
   return (params = {}) => {
@@ -42,5 +43,9 @@ export default {
   getRooms: getConstructor('rooms'),
   getRoom: paramConstructor('rooms'),
   createRoom: postConstructor('rooms'),
-  connectSocket: () => io(config.protocol + window.location.hostname + config.socketPort),
+  connectSocket: () => {
+    const socket = io(config.protocol + window.location.hostname + config.socketPort);
+    store.commit('setSocket', socket);
+    socket.once('authorization', key => store.commit('setToken', key));
+  },
 };

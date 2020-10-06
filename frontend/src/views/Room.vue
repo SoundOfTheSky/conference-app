@@ -1,7 +1,8 @@
 <script>
 import api from '../api';
-import * as webRTC from '../utils/webRTC.js';
-import { toBase64 } from '../utils';
+import webRTC from '../utils/webRTC.js';
+import Utils from '../utils';
+import config from '../config';
 export default {
   data: function() {
     return {
@@ -37,14 +38,16 @@ export default {
         loading: true,
         loginError: '',
       },
+      webRTC: null,
     };
   },
   methods: {
+    // send room settings
     settingsChange() {
       this.socket.emit('changeRoomSettings', this.room);
     },
+    // connect to existing room and register all events
     connectToRoom() {
-      if (!this.socket) this.$store.dispatch('connectSocket');
       this.loginForm.loading = true;
       this.socket.emit(
         'joinRoom',
@@ -60,12 +63,13 @@ export default {
           localStorage.setItem('avatar', this.loginForm.avatar);
           localStorage.setItem('username', this.loginForm.username);
           this.roomChange(response);
-          this.registerEvents();
+          this.socket.on('roomChange', this.roomChange);
+          this.updateMedia();
         },
       );
     },
+    // create room while logging in
     createRoom() {
-      if (!this.socket) this.$store.dispatch('connectSocket');
       this.loginForm.loading = true;
       api
         .createRoom({
@@ -81,12 +85,13 @@ export default {
           this.connectToRoom();
         });
     },
+    // send message
     sendChatMessage() {
       const data = {
         text: this.chatMessage,
         username: this.loginForm.username,
       };
-      webRTC.broadcast({
+      this.webRTC.broadcast({
         event: 'chatMessage',
         data,
       });
@@ -96,6 +101,7 @@ export default {
         this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight;
       });
     },
+    // update all data about room. Includes users joining and leaving
     roomChange(room) {
       this.room = room;
       const memberIds = this.room.members.map(member => member.socketId);
@@ -104,22 +110,13 @@ export default {
         if (i === -1) delete this.members[key];
         else memberIds.splice(i, 1);
       });
-      memberIds.forEach(
-        memberId =>
-          (this.members[memberId] = {
-            avatar: '',
-            video: false,
-          }),
-      );
+      memberIds.forEach(memberId => (this.members[memberId] = {}));
       this.members[this.socket.id] = {
         avatar: this.loginForm.avatar,
         video: this.video,
       };
     },
-    registerEvents() {
-      this.socket.on('roomChange', this.roomChange);
-      this.updateMedia();
-    },
+    // update user devices (micro, video)
     async updateDevices() {
       this.devices = {
         audioinput: [],
@@ -131,45 +128,58 @@ export default {
       if (!this.devices.audioinput.length) this.audio = undefined;
       if (!this.devices.videoinput.length) this.video = undefined;
     },
-    onNewStream(socketId, stream) {
-      this.$refs['video_' + socketId][0].srcObject = stream;
+    registerWebRTC(stream) {
+      this.webRTC = new webRTC(this.socket, stream, config.RTCConfig);
+      this.webRTC.on('connected', socketId => {
+        this.webRTC.send(socketId, { event: 'avatar', avatar: this.loginForm.avatar });
+        this.webRTC.send(socketId, { event: 'toggleAudio', audio: this.audio });
+        this.webRTC.send(socketId, { event: 'toggleVideo', video: this.video });
+      });
+      this.webRTC.on('message', payload => {
+        switch (payload.event) {
+          case 'chatMessage':
+            this.messages.push(payload.data);
+            this.$nextTick(function() {
+              this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight;
+            });
+            break;
+          case 'avatar':
+            this.members = {
+              ...this.members,
+              [payload.socketId]: {
+                ...this.members[payload.socketId],
+                avatar: payload.avatar,
+              },
+            };
+            break;
+          case 'toggleVideo':
+            this.members = {
+              ...this.members,
+              [payload.socketId]: {
+                ...this.members[payload.socketId],
+                video: payload.video,
+              },
+            };
+            break;
+          case 'toggleAudio':
+            this.members = {
+              ...this.members,
+              [payload.socketId]: {
+                ...this.members[payload.socketId],
+                audio: payload.audio,
+              },
+            };
+            break;
+        }
+      });
+      this.webRTC.on('stream', data => (this.$refs['video_' + data.socketId][0].srcObject = data.stream));
+      this.room.members.forEach(
+        async member => member.socketId !== this.socket.id && this.webRTC.getRTCPeerConnection(member.socketId),
+      );
     },
-    onStreamStop(socketId) {
-      console.log('stream stopped: ' + socketId);
-    },
-    onMessage(payload) {
-      switch (payload.event) {
-        case 'chatMessage':
-          this.messages.push(payload.data);
-          this.$nextTick(function() {
-            this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight;
-          });
-          break;
-        case 'avatar':
-          this.members = {
-            ...this.members,
-            [payload.data.socketId]: {
-              ...this.members[payload.data.socketId],
-              avatar: payload.data.avatar,
-            },
-          };
-          break;
-        case 'toggleVideo':
-          this.members = {
-            ...this.members,
-            [payload.data.socketId]: {
-              ...this.members[payload.data.socketId],
-              video: payload.data.video,
-            },
-          };
-          break;
-      }
-    },
-    onConnection(socketId) {
-      webRTC.send(socketId, { event: 'avatar', data: { avatar: this.loginForm.avatar, socketId: this.socket.id } });
-      webRTC.send(socketId, { event: 'toggleVideo', data: { socketId: this.socket.id, video: this.video } });
-    },
+    // get user media and connect to everyone
     async updateMedia() {
+      // Get user devices
       await this.updateDevices();
       const constraints = {};
       if (this.devices.audioinput.length) {
@@ -205,50 +215,38 @@ export default {
       localStorage.setItem('autoGainControl', this.deviceSettings.autoGainControl);
       localStorage.setItem('echoCancellation', this.deviceSettings.echoCancellation);
       localStorage.setItem('noiseSuppression', this.deviceSettings.noiseSuppression);
-      const newConnection = !webRTC.stream;
-      if (!newConnection) webRTC.stopStream();
+      // Restart user stream with new settings
+      const newConnection = !this.webRTC;
+      if (!newConnection) this.webRTC.stopStream();
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       stream.getAudioTracks()[0].enabled = this.audio;
       stream.getVideoTracks()[0].enabled = this.video;
       this.$refs['video_' + this.socket.id][0].srcObject = stream;
+      // connect to everyone in room or just replace stream
       if (newConnection) {
-        webRTC.register(this.socket, stream, this.onNewStream, this.onMessage, this.onStreamStop, this.onConnection);
-        this.room.members.forEach(
-          async member => member.socketId !== this.socket.id && webRTC.getRTCPeerConnection(member.socketId),
-        );
-      } else webRTC.changeStream(stream);
+        this.registerWebRTC(stream);
+      } else this.webRTC.changeStream(stream);
     },
+    // toggle audio and send info about it to everyone
     toggleAudio() {
       this.audio = !this.audio;
-      webRTC.stream.getAudioTracks()[0].enabled = this.audio;
+      this.webRTC.stream.getAudioTracks()[0].enabled = this.audio;
+      this.webRTC.broadcast({ event: 'toggleAudio', audio: this.audio });
+      this.members[this.socket.id].audio = this.audio;
     },
+    // toggle video and send info about it to everyone
     toggleVideo() {
       this.video = !this.video;
-      webRTC.stream.getVideoTracks()[0].enabled = this.video;
-      webRTC.broadcast({ event: 'toggleVideo', data: { socketId: this.socket.id, video: this.video } });
+      this.webRTC.stream.getVideoTracks()[0].enabled = this.video;
+      this.webRTC.broadcast({ event: 'toggleVideo', video: this.video });
       this.members[this.socket.id].video = this.video;
     },
+    // On avatar drop while login
     async dropAvatar(e) {
-      const image = await toBase64(e.dataTransfer.files[0]);
+      const image = await Utils.fileToBase64(e.dataTransfer.files[0]);
       if (image.length * 0.75 > 1024 * 1024 * 8)
         return (this.loginForm.loginError = 'File size is too big. It must be 8mb or less.');
       this.loginForm.avatar = image;
-    },
-    updateUserVideo() {
-      Object.keys(this.$refs).forEach(ref => {
-        if (!ref.startsWith('video_')) return;
-        let video = this.$refs[ref];
-        if (!video || !video[0]) return;
-        const canvas = document.createElement('canvas');
-        canvas.width = 1;
-        canvas.height = 1;
-        const context = canvas.getContext('2d');
-        context.drawImage(video[0], 0, 0, 1, 1);
-        const i = context.getImageData(0, 0, 1, 1).data;
-        if (i[0] === 0 && i[1] === 0 && i[2] === 0) video[0].style.opacity = 0;
-        else video[0].style.opacity = 1;
-      });
-      return;
     },
   },
   computed: {
@@ -257,8 +255,6 @@ export default {
     },
   },
   async created() {
-    this.loginForm.loading = true;
-    this.$store.dispatch('connectSocket');
     api.getRoom(this.$route.params.id).then(async room => {
       this.loginForm.loading = false;
       if (!room) this.loginForm.needCreation = true;
@@ -266,9 +262,8 @@ export default {
     });
   },
   beforeDestroy() {
-    this.$store.dispatch('disconnectSocket');
-    webRTC.closeAllPeers();
-    webRTC.stopStream();
+    this.webRTC.closeAllPeers();
+    this.webRTC.stopStream();
   },
 };
 </script>
