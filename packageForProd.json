@@ -17,6 +17,7 @@
     "@nestjs/websockets": "^7.4.4",
     "reflect-metadata": "^0.1.13",
     "rimraf": "^3.0.2",
-    "rxjs": "^6.5.4"
+    "rxjs": "^6.5.4",
+	"crypto-js": "^4.0.0"
   }
 }

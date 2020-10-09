@@ -129,7 +129,8 @@ export default {
       if (!this.devices.videoinput.length) this.video = undefined;
     },
     registerWebRTC(stream) {
-      this.webRTC = new webRTC(this.socket, stream, config.RTCConfig);
+      this.webRTC = new webRTC(this.socket, config.RTCConfig);
+      this.webRTC.setStream(stream);
       this.webRTC.on('connected', socketId => {
         this.webRTC.send(socketId, { event: 'avatar', avatar: this.loginForm.avatar });
         this.webRTC.send(socketId, { event: 'toggleAudio', audio: this.audio });
@@ -216,19 +217,24 @@ export default {
       localStorage.setItem('echoCancellation', this.deviceSettings.echoCancellation);
       localStorage.setItem('noiseSuppression', this.deviceSettings.noiseSuppression);
       // Restart user stream with new settings
-      const newConnection = !this.webRTC;
-      if (!newConnection) this.webRTC.stopStream();
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      stream.getAudioTracks()[0].enabled = this.audio;
-      stream.getVideoTracks()[0].enabled = this.video;
-      this.$refs['video_' + this.socket.id][0].srcObject = stream;
-      // connect to everyone in room or just replace stream
-      if (newConnection) {
-        this.registerWebRTC(stream);
-      } else this.webRTC.changeStream(stream);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        stream.getAudioTracks()[0].enabled = this.audio;
+        stream.getVideoTracks()[0].enabled = this.video;
+        this.$refs['video_' + this.socket.id][0].srcObject = stream;
+        if (!this.webRTC) this.registerWebRTC(stream);
+        else this.webRTC.setStream(stream);
+        this.updateDevices();
+      } catch (e) {
+        this.audio = undefined;
+        this.video = undefined;
+        console.log('No audio/video permission', e);
+        if (!this.webRTC) this.registerWebRTC();
+      }
     },
     // toggle audio and send info about it to everyone
     toggleAudio() {
+      if (!this.webRTC?.stream?.getAudioTracks().length) return;
       this.audio = !this.audio;
       this.webRTC.stream.getAudioTracks()[0].enabled = this.audio;
       this.webRTC.broadcast({ event: 'toggleAudio', audio: this.audio });
@@ -236,6 +242,7 @@ export default {
     },
     // toggle video and send info about it to everyone
     toggleVideo() {
+      if (!this.webRTC?.stream?.getVideoTracks().length) return;
       this.video = !this.video;
       this.webRTC.stream.getVideoTracks()[0].enabled = this.video;
       this.webRTC.broadcast({ event: 'toggleVideo', video: this.video });

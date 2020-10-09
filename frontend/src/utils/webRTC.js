@@ -5,16 +5,17 @@
   Server must listen to "RTCSendCandidate" and send to "socketId" data like {sender: this.socket.id, candidate: candidate}
   Events sent to client has same name as events sent to server
 */
+import 'webrtc-adapter';
 import { EventEmitter } from 'events';
 const { RTCPeerConnection, RTCSessionDescription } = window;
 export default class webRTC extends EventEmitter {
-  constructor(socket, stream, RTCConfig) {
+  constructor(socket, RTCConfig) {
     super();
     this.socket = socket;
-    this.stream = stream;
     this.RTCConfig = RTCConfig;
     this.socket.on('RTCSendDescription', async payload => {
       const peer = this.getRTCPeerConnection(payload.sender, true);
+      const asnwerWithDescription = !peer.currentRemoteDescription;
       await peer.setRemoteDescription(new RTCSessionDescription(payload.offer));
       if (payload.offer.type === 'offer') {
         const answer = await peer.createAnswer();
@@ -23,6 +24,7 @@ export default class webRTC extends EventEmitter {
           socketId: payload.sender,
           offer: answer,
         });
+        if (asnwerWithDescription) this.sendDescription(payload.sender);
       }
     });
     this.socket.on('RTCSendCandidate', payload => {
@@ -38,8 +40,8 @@ export default class webRTC extends EventEmitter {
   }
   peers = {};
   dataChannels = {};
-  stream = {};
-  socket = {};
+  stream = null;
+  socket = null;
   dataChannelInputStreams = {};
   MAX_CHANNEL_DATA_SIZE = 32768;
   RTCConfig = {};
@@ -72,6 +74,7 @@ export default class webRTC extends EventEmitter {
   // Get peer, or create new if don't exist
   getRTCPeerConnection(socketId, dontSendDescription) {
     const onConnected = () => {
+      if (this.dataChannels[socketId].readyState === 'open') console.log(socketId + ': open');
       if (this.peers[socketId].connectionState === 'connected' && this.dataChannels[socketId].readyState === 'open')
         this.emit('connected', socketId);
     };
@@ -93,9 +96,13 @@ export default class webRTC extends EventEmitter {
       this.dataChannels[socketId].onerror = () => this.closePeer(socketId);
       this.dataChannels[socketId].onclose = () => this.closePeer(socketId);
     }
-    this.stream.getTracks().forEach(track => this.peers[socketId].addTrack(track, this.stream));
-    this.peers[socketId].ontrack = e => this.emit('stream', { socketId, stream: e.streams[0] });
+    if (this.stream) this.stream.getTracks().forEach(track => this.peers[socketId].addTrack(track, this.stream));
+    this.peers[socketId].ontrack = e => {
+      console.log(socketId + ': stream');
+      this.emit('stream', { socketId, stream: e.streams[0] });
+    };
     this.peers[socketId].onconnectionstatechange = () => {
+      console.log(socketId + ': ' + this.peers[socketId].connectionState);
       if (['disconnected', 'failed', 'closed'].includes(this.peers[socketId].connectionState)) {
         this.closePeer(socketId);
         this.emit('disconnected', socketId);
@@ -120,7 +127,8 @@ export default class webRTC extends EventEmitter {
     });
   }
   // Changing this.stream and reconnecting
-  async changeStream(myStream) {
+  async setStream(myStream) {
+    this.stopStream();
     this.stream = myStream;
     Object.keys(this.peers).forEach(socketId => {
       const peer = this.peers[socketId];
@@ -141,6 +149,7 @@ export default class webRTC extends EventEmitter {
   }
   // Send data to exact peer
   send(socketId, payload) {
+    if (this.dataChannels[socketId].readyState !== 'open') return;
     const data = JSON.stringify(payload);
     if (data.length > this.MAX_CHANNEL_DATA_SIZE) {
       const id = Math.floor(Math.random() * 1000000) + '';
