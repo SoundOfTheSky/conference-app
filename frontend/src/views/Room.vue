@@ -131,10 +131,19 @@ export default {
     registerWebRTC(stream) {
       this.webRTC = new webRTC(this.socket, config.RTCConfig);
       this.webRTC.setStream(stream);
-      this.webRTC.on('connected', socketId => {
-        this.webRTC.send(socketId, { event: 'avatar', avatar: this.loginForm.avatar });
-        this.webRTC.send(socketId, { event: 'toggleAudio', audio: this.audio });
-        this.webRTC.send(socketId, { event: 'toggleVideo', video: this.video });
+      this.webRTC.on('statusChange', payload => {
+        this.members = {
+          ...this.members,
+          [payload.socketId]: {
+            ...this.members[payload.socketId],
+            connectionStatus: payload.status,
+          },
+        };
+        if (payload.status === 'connected') {
+          this.webRTC.send(payload.socketId, { event: 'avatar', avatar: this.loginForm.avatar });
+          this.webRTC.send(payload.socketId, { event: 'toggleAudio', audio: this.audio });
+          this.webRTC.send(payload.socketId, { event: 'toggleVideo', video: this.video });
+        }
       });
       this.webRTC.on('message', payload => {
         switch (payload.event) {
@@ -149,7 +158,7 @@ export default {
               ...this.members,
               [payload.socketId]: {
                 ...this.members[payload.socketId],
-                avatar: payload.avatar,
+                avatar: payload.avatar || require('../assets/user.png'),
               },
             };
             break;
@@ -309,19 +318,35 @@ export default {
     <template v-else>
       <div class="playground">
         <div class="members">
-          <div class="member" v-for="member in room.members" :key="member.socketId">
-            <img :src="members[member.socketId].avatar || require('../assets/user.png')" class="avatar" />
-            <video
-              v-show="members[member.socketId].video"
-              autoplay
-              :muted="member.socketId === socket.id"
-              :ref="'video_' + member.socketId"
-            />
-            <div class="username">
-              <div>{{ member.username }}</div>
-              <div class="skew"></div>
+          <template v-for="member in room.members">
+            <div v-if="member.socketId === socket.id" class="member" :key="member.socketId">
+              <img :src="members[member.socketId].avatar || require('../assets/user.png')" class="avatar" />
+              <video v-show="members[member.socketId].video" autoplay muted :ref="'video_' + member.socketId" />
+              <div class="username">
+                <div>{{ member.username }}</div>
+                <div class="skew"></div>
+              </div>
             </div>
-          </div>
+            <div v-else class="member" :key="member.socketId">
+              <img :src="members[member.socketId].avatar" class="avatar" />
+              <video v-show="members[member.socketId].video" autoplay :ref="'video_' + member.socketId" />
+              <div class="username">
+                <div>{{ member.username }}</div>
+                <div class="skew"></div>
+              </div>
+              <transition name="fade">
+                <div class="connectionStatus" v-if="members[member.socketId].connectionStatus !== 'connected'">
+                  {{
+                    members[member.socketId].connectionStatus
+                      ? members[member.socketId].avatar
+                        ? members[member.socketId].connectionStatus.toUpperCase()
+                        : 'LOADING AVATAR'
+                      : 'INITIATING'
+                  }}
+                </div>
+              </transition>
+            </div>
+          </template>
         </div>
         <div class="actions">
           <template v-if="deviceSettingsOpen">
@@ -422,6 +447,14 @@ export default {
 </template>
 <style lang="scss" scoped>
 @import '../index.scss';
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.5s;
+}
+.fade-enter,
+.fade-leave-to {
+  opacity: 0;
+}
 .room {
   display: flex;
   color: $text;
@@ -588,6 +621,14 @@ export default {
             transform: skewX(45deg);
             transform-origin: bottom;
           }
+        }
+        .connectionStatus {
+          width: 100%;
+          height: 100%;
+          position: absolute;
+          display: grid;
+          place-items: center;
+          background: rgba(0, 0, 0, 0.8);
         }
       }
       @media screen and (max-width: 992px) {

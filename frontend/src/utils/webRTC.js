@@ -71,13 +71,20 @@ export default class webRTC extends EventEmitter {
       }
     });
   }
+  checkConnectionStatus(socketId) {
+    const peer = this.peers[socketId];
+    if (['disconnected', 'failed', 'closed'].includes(peer.connectionState)) {
+      this.emit('statusChange', { socketId, status: peer.connectionState });
+      return this.closePeer(socketId);
+    }
+    if (!peer.connectionState !== 'connected')
+      return this.emit('statusChange', { socketId, status: peer.connectionState });
+    if (this.dataChannels[socketId].readyState !== 'open')
+      return this.emit('statusChange', { socketId, status: 'opening' });
+    this.emit('connected', socketId);
+  }
   // Get peer, or create new if don't exist
   getRTCPeerConnection(socketId, dontSendDescription) {
-    const onConnected = () => {
-      if (this.dataChannels[socketId].readyState === 'open') console.log(socketId + ': open');
-      if (this.peers[socketId].connectionState === 'connected' && this.dataChannels[socketId].readyState === 'open')
-        this.emit('connected', socketId);
-    };
     if (this.peers[socketId]) return this.peers[socketId];
     this.peers[socketId] = new RTCPeerConnection(this.RTCConfig);
     if (!this.dataChannels[socketId]) {
@@ -92,7 +99,7 @@ export default class webRTC extends EventEmitter {
           delete this.dataChannelInputStreams[data.id];
         }
       };
-      this.dataChannels[socketId].onopen = onConnected;
+      this.dataChannels[socketId].onopen = () => this.checkConnectionStatus(socketId);
       this.dataChannels[socketId].onerror = () => this.closePeer(socketId);
       this.dataChannels[socketId].onclose = () => this.closePeer(socketId);
     }
@@ -101,13 +108,7 @@ export default class webRTC extends EventEmitter {
       console.log(socketId + ': stream');
       this.emit('stream', { socketId, stream: e.streams[0] });
     };
-    this.peers[socketId].onconnectionstatechange = () => {
-      console.log(socketId + ': ' + this.peers[socketId].connectionState);
-      if (['disconnected', 'failed', 'closed'].includes(this.peers[socketId].connectionState)) {
-        this.closePeer(socketId);
-        this.emit('disconnected', socketId);
-      } else onConnected();
-    };
+    this.peers[socketId].onconnectionstatechange = () => this.checkConnectionStatus(socketId);
     this.peers[socketId].onicecandidate = e => {
       this.socket.emit('RTCSendCandidate', {
         socketId: socketId,
