@@ -15,8 +15,11 @@ export default class webRTC extends EventEmitter {
     this.RTCConfig = RTCConfig;
     this.socket.on('RTCSendDescription', async payload => {
       const peer = this.getRTCPeerConnection(payload.sender, true);
-      const asnwerWithDescription = !peer.currentRemoteDescription;
+      console.log(peer.getTransceivers());
       await peer.setRemoteDescription(new RTCSessionDescription(payload.offer));
+      console.log(peer.getTransceivers());
+      this.updatePeerSenders(payload.sender);
+      console.log(peer.getTransceivers());
       if (payload.offer.type === 'offer') {
         const answer = await peer.createAnswer();
         await peer.setLocalDescription(new RTCSessionDescription(answer));
@@ -24,18 +27,11 @@ export default class webRTC extends EventEmitter {
           socketId: payload.sender,
           offer: answer,
         });
-        if (asnwerWithDescription) this.sendDescription(payload.sender);
       }
     });
     this.socket.on('RTCSendCandidate', payload => {
       if (!payload.candidate) return;
-      const peer = this.getRTCPeerConnection(payload.sender);
-      const interval = setInterval(() => {
-        if (peer.remoteDescription && peer.remoteDescription.type) {
-          peer.addIceCandidate(payload.candidate);
-          clearInterval(interval);
-        }
-      }, 100);
+      this.peers[payload.sender].addIceCandidate(payload.candidate);
     });
   }
   peers = {};
@@ -103,7 +99,6 @@ export default class webRTC extends EventEmitter {
       this.dataChannels[socketId].onerror = () => this.closePeer(socketId);
       this.dataChannels[socketId].onclose = () => this.closePeer(socketId);
     }
-    if (this.stream) this.stream.getTracks().forEach(track => this.peers[socketId].addTrack(track, this.stream));
     this.peers[socketId].ontrack = e => {
       console.log(socketId + ': stream');
       this.emit('stream', { socketId, stream: e.streams[0] });
@@ -115,7 +110,12 @@ export default class webRTC extends EventEmitter {
         candidate: e.candidate,
       });
     };
-    if (!dontSendDescription) this.sendDescription(socketId);
+    if (!dontSendDescription) {
+      this.peers[socketId].addTransceiver('audio');
+      this.peers[socketId].addTransceiver('video');
+      this.updatePeerSenders(socketId);
+      this.sendDescription(socketId);
+    }
     return this.peers[socketId];
   }
   // Send content description
@@ -127,20 +127,25 @@ export default class webRTC extends EventEmitter {
       offer,
     });
   }
+  updatePeerSenders(socketId) {
+    if (!this.stream) return;
+    const peer = this.peers[socketId];
+    const transceivers = peer.getTransceivers();
+    const tracks = this.stream.getTracks();
+    const senderAudio = transceivers.find(el => el.receiver.track.kind === 'audio').sender;
+    const senderVideo = transceivers.find(el => el.receiver.track.kind === 'video').sender;
+    const trackAudio = tracks.find(el => el.kind === 'audio');
+    const trackVideo = tracks.find(el => el.kind === 'video');
+    if (trackAudio) senderAudio.replaceTrack(trackAudio);
+    if (trackVideo) senderVideo.replaceTrack(trackVideo);
+    this.peers[socketId].getTransceivers().map(el => (el.direction = 'sendrecv'));
+  }
   // Changing this.stream and reconnecting
   async setStream(myStream) {
     this.stopStream();
     this.stream = myStream;
     Object.keys(this.peers).forEach(socketId => {
-      const peer = this.peers[socketId];
-      const senders = peer.getSenders();
-      const tracks = this.stream.getTracks();
-      const senderAudio = senders.find(el => el.track && el.track.kind === 'audio');
-      const senderVideo = senders.find(el => el.track && el.track.kind === 'video');
-      const trackAudio = tracks.find(el => el.kind === 'audio');
-      const trackVideo = tracks.find(el => el.kind === 'video');
-      if (senderAudio && trackAudio) senderAudio.replaceTrack(trackAudio);
-      if (senderVideo && trackVideo) senderVideo.replaceTrack(trackVideo);
+      this.updatePeerSenders(socketId);
       this.sendDescription(socketId);
     });
   }

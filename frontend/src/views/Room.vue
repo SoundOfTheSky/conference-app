@@ -123,8 +123,10 @@ export default {
         audiooutput: [],
         videoinput: [],
       };
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      devices.forEach(device => this.devices[device.kind].push(device));
+      if (navigator.mediaDevices) {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        devices.forEach(device => this.devices[device.kind].push(device));
+      }
       if (!this.devices.audioinput.length) this.audio = undefined;
       if (!this.devices.videoinput.length) this.video = undefined;
     },
@@ -335,10 +337,7 @@ export default {
                 <div class="skew"></div>
               </div>
               <transition name="fade">
-                <div
-                  class="connectionStatus"
-                  v-if="members[member.socketId].connectionStatus !== 'connected' && members[member.socketId].avatar"
-                >
+                <div class="connectionStatus" v-if="!members[member.socketId].avatar">
                   {{
                     members[member.socketId].connectionStatus
                       ? members[member.socketId].connectionStatus === 'connected'
