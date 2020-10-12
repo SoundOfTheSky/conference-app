@@ -335,12 +335,15 @@ export default {
                 <div class="skew"></div>
               </div>
               <transition name="fade">
-                <div class="connectionStatus" v-if="members[member.socketId].connectionStatus !== 'connected'">
+                <div
+                  class="connectionStatus"
+                  v-if="members[member.socketId].connectionStatus !== 'connected' && members[member.socketId].avatar"
+                >
                   {{
                     members[member.socketId].connectionStatus
-                      ? members[member.socketId].avatar
-                        ? members[member.socketId].connectionStatus.toUpperCase()
-                        : 'LOADING AVATAR'
+                      ? members[member.socketId].connectionStatus === 'connected'
+                        ? 'LOADING AVATAR'
+                        : members[member.socketId].connectionStatus.toUpperCase()
                       : 'INITIATING'
                   }}
                 </div>
