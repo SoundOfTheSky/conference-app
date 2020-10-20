@@ -130,9 +130,10 @@ export default {
       if (!this.devices.audioinput.length) this.audio = undefined;
       if (!this.devices.videoinput.length) this.video = undefined;
     },
+    // create event listeners
     registerWebRTC(stream) {
       this.webRTC = new webRTC(this.socket, config.RTCConfig);
-      this.webRTC.setStream(stream);
+      if (stream) this.webRTC.setStream(stream);
       this.webRTC.on('statusChange', payload => {
         this.members = {
           ...this.members,
@@ -184,7 +185,9 @@ export default {
             break;
         }
       });
-      this.webRTC.on('stream', data => (this.$refs['video_' + data.socketId][0].srcObject = data.stream));
+      this.webRTC.on('stream', data => {
+        this.$refs['video_' + data.socketId][0].srcObject = data.stream;
+      });
       this.room.members.forEach(
         async member => member.socketId !== this.socket.id && this.webRTC.getRTCPeerConnection(member.socketId),
       );
