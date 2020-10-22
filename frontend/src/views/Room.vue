@@ -1,6 +1,6 @@
 <script>
 import api from '../api';
-import webRTC from '../utils/webRTC.js';
+import { webRTC, checkAvailability } from '../utils/webRTC.js';
 import Utils from '../utils';
 import config from '../config';
 export default {
@@ -39,6 +39,7 @@ export default {
         loginError: '',
       },
       webRTC: null,
+      fatalError: null,
     };
   },
   methods: {
@@ -276,11 +277,18 @@ export default {
     },
   },
   async created() {
-    api.getRoom(this.$route.params.id).then(async room => {
-      this.loginForm.loading = false;
-      if (!room) this.loginForm.needCreation = true;
-      else this.loginForm.needPassword = room.needPassword;
-    });
+    checkAvailability()
+      .then(a => {
+        console.log('[WebRTC] ' + a);
+      })
+      .catch(e => (this.fatalError = e))
+      .finally(() => {
+        api.getRoom(this.$route.params.id).then(async room => {
+          this.loginForm.loading = false;
+          if (!room) this.loginForm.needCreation = true;
+          else this.loginForm.needPassword = room.needPassword;
+        });
+      });
   },
   beforeDestroy() {
     this.webRTC.closeAllPeers();
@@ -290,7 +298,11 @@ export default {
 </script>
 <template>
   <div class="room">
-    <div class="login" v-if="!room">
+    <div class="fatalError" v-if="fatalError">
+      <pre>{{ fatalError }}</pre>
+      <div class="login-button" @click="fatalError = null">Ignore this error</div>
+    </div>
+    <div class="login" v-else-if="!room">
       <div v-if="loginForm.loading">Loading...</div>
       <template v-else>
         <template v-if="loginForm.needCreation">
@@ -463,6 +475,22 @@ export default {
 .room {
   display: flex;
   color: $text;
+  .login-button {
+    cursor: pointer;
+    padding: 4px 16px;
+    background: rgb(86, 86, 207);
+    color: #fff;
+    border-radius: 20px;
+  }
+  .fatalError {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    text-align: center;
+  }
   .login {
     width: 100%;
     height: 100%;
@@ -478,13 +506,6 @@ export default {
     }
     .error {
       color: red;
-    }
-    .login-button {
-      cursor: pointer;
-      padding: 4px 16px;
-      background: rgb(86, 86, 207);
-      color: #fff;
-      border-radius: 20px;
     }
   }
   .sidebar {

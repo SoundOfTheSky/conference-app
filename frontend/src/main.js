@@ -1,4 +1,3 @@
-console.log(process.env);
 const protocol = process.env.VUE_APP_PROTOCOL.replace('//', '');
 if (location.protocol != protocol)
   location.href = protocol + window.location.href.substring(window.location.protocol.length);

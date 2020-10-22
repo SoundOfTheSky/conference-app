@@ -8,13 +8,13 @@
 import 'webrtc-adapter';
 import { EventEmitter } from 'events';
 const { RTCPeerConnection } = window;
-export default class webRTC extends EventEmitter {
+export class webRTC extends EventEmitter {
   constructor(socket, RTCConfig) {
     super();
     this.socket = socket;
     this.RTCConfig = RTCConfig;
     this.socket.on('RTCSendDescription', async payload => {
-      console.log('[webRTC] Got offer');
+      console.log('[webRTC] Got ' + payload.offer.type);
       const peer = this.getRTCPeerConnection(payload.sender, true);
       await peer.setRemoteDescription(payload.offer);
       if (payload.offer.type === 'offer') {
@@ -26,7 +26,10 @@ export default class webRTC extends EventEmitter {
         });
       }
     });
-    this.socket.on('RTCSendCandidate', payload => this.peers[payload.sender].addIceCandidate(payload.candidate));
+    this.socket.on('RTCSendCandidate', payload => {
+      console.log('[webRTC] Got candidate:', payload.candidate);
+      this.peers[payload.sender].addIceCandidate(payload.candidate);
+    });
   }
   peers = {};
   dataChannels = {};
@@ -106,7 +109,8 @@ export default class webRTC extends EventEmitter {
     this.peers[socketId].onconnectionstatechange = () => this.checkConnectionStatus(socketId);
     this.peers[socketId].onsignalingstatechange = () => this.checkConnectionStatus(socketId);
     this.peers[socketId].onicecandidate = e => {
-      if (!e.candidate) return;
+      console.log('[webRTC] Send candidate:', e.candidate);
+      //if (!e.candidate) return;
       this.socket.emit('RTCSendCandidate', {
         socketId: socketId,
         candidate: e.candidate,
@@ -195,4 +199,64 @@ export default class webRTC extends EventEmitter {
     if (this.stream) this.stream.getTracks().forEach(track => track.stop());
     this.stream = null;
   }
+}
+export function checkAvailability() {
+  return new Promise((r, j) => {
+    try {
+      let candidates = [];
+      let pc = new RTCPeerConnection({
+        iceServers: [
+          {
+            urls: 'stun:stun1.l.google.com:19302',
+          },
+          {
+            urls: 'stun:stun2.l.google.com:19302',
+          },
+        ],
+      });
+      const timeout = setTimeout(check, 5000);
+      // eslint-disable-next-line no-inner-declarations
+      function check() {
+        console.log(candidates);
+        clearTimeout(timeout);
+        pc.close();
+        if (candidates.length === 0)
+          j(`WTF?
+It looks like your browser doesn't want to establish a WebRTC connection.
+What can you do?
+1. Update your browser.
+2. Install Chrome or Mozilla Firefox.
+3. Check your internet connection and firewall.
+
+Or just ignore this error, but there are 90% chance that you won't be able to connect.
+Unless you're in lan.`);
+        else if (candidates.length === 1) r('Normal NAT');
+        else if (candidates.some(cand => candidates.some(cand2 => cand.port !== cand2.port))) {
+          j(`Unfortunately, you cannot use this application because you are behind symmetric NAT.
+This means your internet provider is saving money on you.
+What can you do?
+1. Use a VPN. I recommend to use Radmin.
+2. Change your internet provider.
+3. Buy static ip from your provider.
+
+Or just ignore this error, but there are 90% chance that you won't be able to connect.
+Unless you're in lan.`);
+        } else r('Maybe normal NAT');
+      }
+      pc.createDataChannel('checkAvailabilty');
+      pc.onicecandidate = e => {
+        if (e.candidate && e.candidate.type === 'srflx') candidates.push(e.candidate);
+        else if (!e.candidate) check();
+      };
+      pc.createOffer().then(offer => pc.setLocalDescription(offer));
+    } catch (e) {
+      console.error(e);
+      j(`Ugh...
+Something bad happened while we were checking your browser.
+Don't panic. There is something you can do.
+1. Update your browser.
+2. Install Chrome or Mozilla Firefox.
+3. Right click -> Inspect element -> Console. Google it.`);
+    }
+  });
 }
